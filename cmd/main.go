@@ -1,7 +1,6 @@
 package main
 
 import (
-	// "gin-quickstart/pkg/ai/ws"
 	"context"
 	"log"
 	"net/http"
