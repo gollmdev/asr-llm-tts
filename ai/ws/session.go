@@ -2,14 +2,18 @@ package ws
 
 import (
 	"context"
-	"gin-quickstart/pkg/ai/provider/asr"
-	"gin-quickstart/pkg/ai/provider/llm"
-	"gin-quickstart/pkg/ai/provider/tts"
-	"gin-quickstart/pkg/eventbus"
+	// "gin-quickstart/pkg/ai/provider/asr"
+	// "gin-quickstart/pkg/ai/provider/llm"
+	// "gin-quickstart/pkg/ai/provider/tts"
+	// "gin-quickstart/pkg/eventbus"
 	"log"
 	"strings"
 	"sync"
 
+	"github.com/golangllm/asr-llm-tts/ai/provider/asr"
+	"github.com/golangllm/asr-llm-tts/ai/provider/llm"
+	"github.com/golangllm/asr-llm-tts/ai/provider/tts"
+	"github.com/golangllm/asr-llm-tts/eventbus"
 	"golang.org/x/sync/errgroup"
 )
 

@@ -3,11 +3,13 @@ package asr
 import (
 	"context"
 	"errors"
-	"gin-quickstart/pkg/eventbus"
+
+	// "gin-quickstart/pkg/eventbus"
 	"log"
 	"os"
 	"time"
 
+	"github.com/golangllm/asr-llm-tts/eventbus"
 	"golang.org/x/sync/errgroup"
 )
 
