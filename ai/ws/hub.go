@@ -1,6 +1,9 @@
 package ws
 
-import "log"
+import (
+	"context"
+	"log"
+)
 
 type Hub struct {
 	clients       map[*Client]bool
@@ -19,9 +22,13 @@ func NewHub() *Hub {
 	return &hub
 }
 
-func (h *Hub) Run() {
+func (h *Hub) Run(ctx context.Context) {
 	for {
 		select {
+		case <-ctx.Done():
+			log.Println("Hub received shutdown signal")
+			return
+
 		case client := <-h.Register:
 			h.clients[client] = true
 			log.Println("新客户端加入，当前在线:", len(h.clients))

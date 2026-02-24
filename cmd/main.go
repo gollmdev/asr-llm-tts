@@ -44,7 +44,7 @@ func main() {
 	defer stop()
 
 	hub := ws.NewHub()
-	go hub.Run()
+	go hub.Run(ctx)
 	router.GET("/ws", func(c *gin.Context) {
 		ServeWs(hub, c.Writer, c.Request)
 	})
