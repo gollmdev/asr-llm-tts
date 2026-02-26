@@ -62,12 +62,18 @@ type Session struct {
 	ttsEnabled bool
 	// consumers  map[string]func() // key -> cancel func
 	consumers map[SessionName]*Consumer
+	callback  Callback
 
 	// // 新增：用于等待 runPipeline 退出
 	// Done chan struct{}
 }
 
-func NewSession() *Session {
+type Callback interface {
+	OnUserMessage(text string, publishMesaage func(string)) []map[string]any
+	OnFinish()
+}
+
+func NewSession(callback Callback) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
 	// gCtx, gCancel := context.WithCancel(context.Background())
 	g, ctx := errgroup.WithContext(ctx) //  关键：绑定 context
@@ -89,7 +95,7 @@ func NewSession() *Session {
 		// textIn:  make(chan string, 32),
 		// audioIn: make(chan []byte, 32),
 		// done:    make(chan struct{}), // 标记 runPipeline 是否退出
-
+		callback: callback,
 	}
 
 	// 启动处理协程
@@ -175,6 +181,9 @@ func (s *Session) MonitorSubSize() {
 			for name := range s.consumers {
 				delete(s.consumers, name)
 			}
+		}
+		if s.callback != nil {
+			s.callback.OnFinish()
 		}
 		return nil
 	})
@@ -320,7 +329,8 @@ func (s *Session) LLMConsumer() {
 					log.Println("TTSStream completed")
 					return nil
 				}
-				LLMStream(message.Data.(string), s.ctx, func(chunk string) {
+
+				s.LLMStream(message.Data.(string), s.ctx, func(chunk string) {
 					// log.Println("LLMStream received chunk:", chunk)
 					s.sendJson(SessionText, "message", chunk)
 					s.FullResponse.WriteString(chunk)
@@ -406,7 +416,7 @@ func (s *Session) LLMConsumer() {
 //		// s.cancel()
 //		// 在 LLM 流式返回完毕后，还可以执行其他逻辑，比如 TTS 转换等
 //	}
-func LLMStream(inputText string, ctx context.Context, onChunkReceived func(string)) {
+func (s *Session) LLMStream(inputText string, ctx context.Context, onChunkReceived func(string)) {
 	// cb := &PrintHandler{}
 	llm := llm.NewLLMStream(
 		"qwen-plus",
@@ -434,10 +444,19 @@ func LLMStream(inputText string, ctx context.Context, onChunkReceived func(strin
 	)
 	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	// defer cancel()
+	if s.callback != nil {
+		input := s.callback.OnUserMessage(inputText, func(message string) {
+			// onChunkReceived(message)
+			s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMTextOnce, Data: message})
 
-	llm.Call(ctx, []map[string]any{
-		{"role": "user", "content": inputText},
-	})
+		})
+		llm.Call(ctx, input)
+		return
+	} else {
+		llm.Call(ctx, []map[string]any{
+			{"role": "user", "content": inputText},
+		})
+	}
 }
 
 // func LLMStream2(inputText string, ctx context.Context, onChunkReceived func(string)) {

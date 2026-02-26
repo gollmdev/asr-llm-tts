@@ -9,4 +9,5 @@ const (
 	EventTextChunk      EventType = "text.chunk"
 	EventASRChunk       EventType = "asr.chunk"
 	EventTitleGenerated EventType = "title.generated"
+	EventLLMTextOnce    EventType = "llm.text.once"
 )

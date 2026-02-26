@@ -141,7 +141,9 @@ func (l *LLMStream) Call(ctx context.Context, message []map[string]any) error {
 		if resp.StatusCode != http.StatusOK {
 			// Read body for debugging (limit size to avoid huge dumps)
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			panic(fmt.Errorf("request failed: %s - %s", resp.Status, string(data)))
+			// panic()
+			// fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
+			return fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
 		}
 
 		reader := NewChatStreamReader(resp.Body, l.callback, l.toolCalls)

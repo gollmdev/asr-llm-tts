@@ -28,7 +28,7 @@ func ServeWs(hub *ws.Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session := ws.NewSession()
+	session := ws.NewSession(nil)
 
 	client := &ws.Client{Hub: hub, Conn: conn, Session: session}
 	client.Hub.Register <- client
