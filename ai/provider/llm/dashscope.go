@@ -85,22 +85,27 @@ func NewLLMStream(model string,
 	}
 }
 
-func (l *LLMStream) reqPayload(message []map[string]any) map[string]any {
+func (l *LLMStream) reqPayload(message []map[string]any, stream bool) map[string]any {
 	body := map[string]any{
 		"model":    l.model,
 		"messages": message,
-		"stream":   true,
+		"stream":   stream,
 		"tools":    l.tools,
-		"stream_options": map[string]any{
+		// "stream_options": map[string]any{
+		// 	"include_usage": true,
+		// },
+	}
+	if stream {
+		body["stream_options"] = map[string]any{
 			"include_usage": true,
-		},
+		}
 	}
 	// b, _ := json.Marshal(body)
 	return body
 }
 
-func (l *LLMStream) buildRequest(ctx context.Context, message []map[string]any) (*http.Request, error) {
-	paylaod := l.reqPayload(message)
+func (l *LLMStream) buildRequest(ctx context.Context, message []map[string]any, stream bool) (*http.Request, error) {
+	paylaod := l.reqPayload(message, stream)
 	b, err := json.Marshal(paylaod)
 	if err != nil {
 		return nil, err
@@ -116,7 +121,7 @@ func (l *LLMStream) buildRequest(ctx context.Context, message []map[string]any) 
 
 }
 
-func (l *LLMStream) Call(ctx context.Context, message []map[string]any) error {
+func (l *LLMStream) Call(ctx context.Context, message []map[string]any, stream bool) error {
 
 	client := &http.Client{Timeout: 0}
 	l.currentMessage = append(l.currentMessage, message...)
@@ -128,7 +133,7 @@ func (l *LLMStream) Call(ctx context.Context, message []map[string]any) error {
 
 		}
 		l.toolCalls = make(map[string]*ToolCallState)
-		req, err := l.buildRequest(ctx, l.currentMessage)
+		req, err := l.buildRequest(ctx, l.currentMessage, stream)
 		if err != nil {
 			return err
 		}
@@ -142,11 +147,11 @@ func (l *LLMStream) Call(ctx context.Context, message []map[string]any) error {
 			// Read body for debugging (limit size to avoid huge dumps)
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			// panic()
-			// fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
+			log.Printf("request failed: %s - %s", resp.Status, string(data))
 			return fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
 		}
 
-		reader := NewChatStreamReader(resp.Body, l.callback, l.toolCalls)
+		reader := NewChatStreamReader(resp.Body, l.callback, l.toolCalls, stream)
 		reader.Run(ctx)
 		if len(l.toolCalls) != 0 {
 			i := 0

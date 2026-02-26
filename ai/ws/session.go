@@ -450,12 +450,12 @@ func (s *Session) LLMStream(inputText string, ctx context.Context, onChunkReceiv
 			s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMTextOnce, Data: message})
 
 		})
-		llm.Call(ctx, input)
+		llm.Call(ctx, input, true)
 		return
 	} else {
 		llm.Call(ctx, []map[string]any{
 			{"role": "user", "content": inputText},
-		})
+		}, true)
 	}
 }
 
