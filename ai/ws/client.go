@@ -64,6 +64,7 @@ func (c *Client) ReadPump() {
 
 	c.Session.LLMConsumer()
 	c.Session.MonitorSubSize()
+	// c.Session.LLMTaskConsumer() // 启动 LLM 任务消费者
 
 	for {
 		select {
