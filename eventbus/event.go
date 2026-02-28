@@ -11,4 +11,6 @@ const (
 	EventTitleGenerated      EventType = "title.generated"
 	EventUserMessage         EventType = "user.message"
 	EventLLMResponseComplete EventType = "llm.response.complete"
+	EventLLMCitation         EventType = "llm.citation"
+	EventLLMThoughtChain     EventType = "llm.thought_chain"
 )

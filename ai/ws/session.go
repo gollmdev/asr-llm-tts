@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gollmdev/asr-llm-tts/ai/model"
 	"github.com/gollmdev/asr-llm-tts/ai/provider/asr"
 	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
 	"github.com/gollmdev/asr-llm-tts/ai/provider/tts"
@@ -73,6 +74,9 @@ type Session struct {
 
 type Callback interface {
 	OnEvent(eventType eventbus.EventType, text string, publishMesaage func(message []map[string]any))
+	// OnEvent(eventType eventbus.EventType, text map[string]any, publishMesaage func(message []map[string]any))
+	OnCitationsEvent(citations map[string]model.Citations)
+	OnThoughtChainEvent(thoughtChain model.ThoughtChain)
 	OnEventResult(ctx context.Context, eventType eventbus.EventType, text string, send func(msgType SessionMessageType, data map[string]any))
 	OnFinish()
 	GetMessage(text string) []map[string]any
@@ -397,6 +401,31 @@ func (s *Session) LLMConsumer() {
 					// })
 					s.callback.OnEvent(eventbus.EventLLMResponseComplete, finalResponse, func(subMessage []map[string]any) {
 						s.bus.Publish(eventbus.Event{Type: eventbus.EventUserMessage, Data: subMessage})
+					})
+					// mock data for citations and thought chain events
+					s.callback.OnCitationsEvent(map[string]model.Citations{
+						"12345679": {
+							Title:   "cite1",
+							Number:  1,
+							ChunkID: "12345679",
+						}, "89454131": {
+							Title:   "cite2",
+							Number:  2,
+							ChunkID: "89454131",
+						},
+					})
+					s.callback.OnThoughtChainEvent(model.ThoughtChain{
+						Status: "success",
+						Title:  "thought chain title",
+						Items: []model.ThoughtItem{
+							{
+								Title:   "thought1",
+								Content: "thought content 1",
+							}, {
+								Title:   "thought2",
+								Content: "thought content 2",
+							},
+						},
 					})
 				}
 				log.Println("Final LLM Response:", finalResponse)
