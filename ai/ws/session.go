@@ -2,6 +2,8 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
+
 	// "gin-quickstart/pkg/ai/provider/asr"
 	// "gin-quickstart/pkg/ai/provider/llm"
 	// "gin-quickstart/pkg/ai/provider/tts"
@@ -71,7 +73,7 @@ type Session struct {
 
 type Callback interface {
 	OnEvent(eventType eventbus.EventType, text string, publishMesaage func(message []map[string]any))
-	OnEventResult(ctx context.Context, eventType eventbus.EventType, text string)
+	OnEventResult(ctx context.Context, eventType eventbus.EventType, text string, send func(msgType SessionMessageType, data map[string]any))
 	OnFinish()
 	GetMessage(text string) []map[string]any
 }
@@ -340,7 +342,9 @@ func (s *Session) LLMTaskConsumer() func() {
 					// s.FullResponse.WriteString(chunk)
 					// s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
 					if s.callback != nil {
-						s.callback.OnEventResult(s.ctx, message.Type, chunk)
+						s.callback.OnEventResult(s.ctx, message.Type, chunk, func(msgType SessionMessageType, data map[string]any) {
+							s.sendJsonMap(msgType, data)
+						})
 					}
 				})
 
@@ -387,14 +391,23 @@ func (s *Session) LLMConsumer() {
 				s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMDone, Data: nil})
 				// 获取完整响应（此时才转为 string）
 				finalResponse := s.FullResponse.String()
+				if s.callback != nil {
+					// s.callback.OnEventResult(s.ctx, eventbus.EventLLMResponseComplete, finalResponse, func(msgType SessionMessageType, data map[string]any) {
+					// 	s.sendJsonMap(msgType, data)
+					// })
+					s.callback.OnEvent(eventbus.EventLLMResponseComplete, finalResponse, func(subMessage []map[string]any) {
+						s.bus.Publish(eventbus.Event{Type: eventbus.EventUserMessage, Data: subMessage})
+					})
+				}
 				log.Println("Final LLM Response:", finalResponse)
+
 				if !s.ttsEnabled {
 					// close(s.Done)
 					log.Println(">> llm close session, tts is not open! ")
 				}
 				// close(s.Done)
 
-				close()
+				close() // close llm task consumer
 				log.Println("llm consumer close!")
 
 				return nil
@@ -658,6 +671,14 @@ func (s *Session) sendJson(msgType SessionMessageType, event string, data string
 	s.sendSafe(msgType, msg)
 }
 
+func (s *Session) sendJsonMap(msgType SessionMessageType, data map[string]any) {
+	// msg := buildMessage(event, data)
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		log.Println("json marshal error:", err)
+	}
+	s.sendSafe(msgType, jsonBytes)
+}
 func (s *Session) sendSafe(msgType SessionMessageType, data []byte) {
 	select {
 	case s.output <- SessionMessage{Type: msgType, Data: data}:
