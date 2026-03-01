@@ -36,25 +36,58 @@ type Client struct {
 	cancel context.CancelFunc
 
 	closeOnce sync.Once
+
+	userId int64
+
+	registerCh chan bool
 }
 
-func NewClient(hub *Hub, conn *websocket.Conn, session *Session) *Client {
+func NewClient(hub *Hub, conn *websocket.Conn, session *Session, userId int64) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	g, ctx := errgroup.WithContext(ctx)
 
 	return &Client{
-		Hub:     hub,
-		Conn:    conn,
-		Session: session,
-		ctx:     ctx,
-		cancel:  cancel,
-		g:       g,
+		Hub:        hub,
+		Conn:       conn,
+		Session:    session,
+		ctx:        ctx,
+		cancel:     cancel,
+		g:          g,
+		userId:     userId,
+		registerCh: make(chan bool, 1), // ⭐ 必须带缓冲
 	}
 }
 
 func (c *Client) Start() {
 	// 启动 readPump 和 writePump
 	c.Hub.Register <- c
+
+	// 等待 Hub 处理完成
+	ok := <-c.registerCh
+	if !ok {
+
+		//  resp := WsResponse{
+		// 	Code:    1001,
+		// 	Message: "连接数已达上限",
+		// }
+
+		// _ = c.Conn.WriteJSON(resp)
+		// _ = c.Conn.WriteJSON(map[string]any{
+		// 	"type":    "error",
+		// 	"code":    1001,
+		// 	"message": "连接数已达上限",
+		// })
+		// too many connections, send error message and close connection
+		c.sendMessage(buildMessage("many_connections", "连接数已达上限"))
+		// 优雅关闭
+		_ = c.Conn.WriteMessage(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "too many connections"),
+		)
+		c.Conn.Close()
+		log.Println("ws-conn: 注册失败，连接已关闭")
+		return
+	}
 
 	c.g.Go(func() error {
 		return c.ReadPump()
@@ -67,7 +100,7 @@ func (c *Client) Start() {
 	go func() {
 		if err := c.g.Wait(); err != nil {
 			c.Session.cancel()
-			log.Println("client closed:", err)
+			log.Println("ws-conn: error client closed:", err)
 		}
 		c.Close()
 	}()
@@ -127,7 +160,7 @@ func (c *Client) ReadPump() error {
 		// 	log.Println("Session processing done, exiting readPump.")
 		// 	return
 		case <-c.ctx.Done():
-			log.Println("Client context done, exiting readPump.")
+			log.Println("ws-conn: ws-conn: Client context done, exiting readPump.")
 			return c.ctx.Err()
 		case <-c.Session.ctx.Done():
 			log.Println("Session is closed, exiting readPump.")
