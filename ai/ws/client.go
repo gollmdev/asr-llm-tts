@@ -1,11 +1,14 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/sync/errgroup"
 )
 
 // type WsMessageType string
@@ -27,6 +30,58 @@ type Client struct {
 	Conn *websocket.Conn
 	// send    chan WsMessage
 	Session *Session
+
+	g      *errgroup.Group
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	closeOnce sync.Once
+}
+
+func NewClient(hub *Hub, conn *websocket.Conn, session *Session) *Client {
+	ctx, cancel := context.WithCancel(context.Background())
+	g, ctx := errgroup.WithContext(ctx)
+
+	return &Client{
+		Hub:     hub,
+		Conn:    conn,
+		Session: session,
+		ctx:     ctx,
+		cancel:  cancel,
+		g:       g,
+	}
+}
+
+func (c *Client) Start() {
+	// 启动 readPump 和 writePump
+	c.Hub.Register <- c
+
+	c.g.Go(func() error {
+		return c.ReadPump()
+	})
+
+	c.g.Go(func() error {
+		return c.WritePump()
+	})
+
+	go func() {
+		if err := c.g.Wait(); err != nil {
+			c.Session.cancel()
+			log.Println("client closed:", err)
+		}
+		c.Close()
+	}()
+}
+
+func (c *Client) Close() {
+	c.closeOnce.Do(func() {
+		c.Session.Close()
+		c.Conn.Close()
+		c.Hub.unregister <- c
+		log.Println("ws-conn: client closed")
+		// c.Session.Close()
+		// c.Conn.Close()
+	})
 }
 
 // Client (WebSocket)
@@ -40,7 +95,7 @@ type Client struct {
 // read pump pumps messages from the WebSocket connection to the hub.
 // The application runs readPump in a per-connection goroutine.
 // The application ensures that there is at most one reader on a connection by executing all reads from this goroutine.
-func (c *Client) ReadPump() {
+func (c *Client) ReadPump() error {
 	defer func() {
 		// On exit, unregister the client and close the connection
 		// send c to unregister channel
@@ -49,7 +104,7 @@ func (c *Client) ReadPump() {
 		// close the session
 		// close the connection
 		// c.conn.Close()
-		log.Println("close readPump!")
+		log.Println("ws-conn: close readPump!")
 	}()
 
 	// set read limit
@@ -71,9 +126,12 @@ func (c *Client) ReadPump() {
 		// case <-c.session.Done:
 		// 	log.Println("Session processing done, exiting readPump.")
 		// 	return
+		case <-c.ctx.Done():
+			log.Println("Client context done, exiting readPump.")
+			return c.ctx.Err()
 		case <-c.Session.ctx.Done():
 			log.Println("Session is closed, exiting readPump.")
-			return
+			return nil
 		default:
 			// broadcast the received message to all clients
 			// c.hub.broadcast <- message
@@ -83,12 +141,12 @@ func (c *Client) ReadPump() {
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("read error: %v", err)
-				c.Session.cancel()
+
 			} else {
 				log.Printf("read info: %v", err)
 			}
-
-			return
+			c.Session.cancel()
+			return nil
 		}
 		switch msgType {
 		case websocket.TextMessage:
@@ -202,26 +260,29 @@ func (c *Client) ReadPump() {
 // 	}
 // }
 
-func (c *Client) WritePump() {
+func (c *Client) WritePump() error {
 	ticker := time.NewTicker(50 * time.Second)
 	defer func() {
-
-		c.Session.Close()
 		ticker.Stop()
-		c.Conn.Close()
-		c.Hub.unregister <- c
-		log.Println("close writePump!")
+		c.Close()
+		// c.Session.Close()
+
+		// c.Conn.Close()
+		// c.Hub.unregister <- c
+		log.Println("ws-conn: close writePump!")
 	}()
 	for {
 		select {
-
+		case <-c.ctx.Done():
+			log.Println("Client context done, exiting writePump.")
+			return c.ctx.Err()
 		case message, ok := <-c.Session.output:
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {
 				// Hub 关闭 channel
 				// c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 				log.Println("Session output channel closed.")
-				return
+				return nil
 			}
 			switch message.Type {
 			case SessionText:
@@ -239,7 +300,7 @@ func (c *Client) WritePump() {
 					c.Session.cancel()
 					log.Println("write error:", err)
 
-					return
+					return nil
 				}
 			}
 
@@ -249,7 +310,7 @@ func (c *Client) WritePump() {
 			// }
 		case <-c.Session.ctx.Done(): // 监听 session 的结束信号
 			log.Println("Session is closed, exiting writePump.")
-			return
+			return nil
 		// case <-c.session.Done:
 		// 	log.Println("Session processing done, exiting writePump.")
 		// 	return
@@ -258,7 +319,7 @@ func (c *Client) WritePump() {
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				c.Session.cancel()
 				log.Println("ping error:", err)
-				return
+				return nil
 			}
 		}
 	}

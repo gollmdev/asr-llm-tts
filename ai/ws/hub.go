@@ -31,13 +31,13 @@ func (h *Hub) Run(ctx context.Context) {
 
 		case client := <-h.Register:
 			h.clients[client] = true
-			log.Println("新客户端加入，当前在线:", len(h.clients))
+			log.Println("ws-conn: 新客户端加入，当前在线:", len(h.clients))
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
 				// delete map item by key
 				delete(h.clients, client)
 				// close(client.send)
-				log.Println("客户端离开，当前在线:", len(h.clients))
+				log.Println("ws-conn: 客户端离开，当前在线:", len(h.clients))
 			}
 		case message := <-h.broadcastByte:
 			for client := range h.clients {
