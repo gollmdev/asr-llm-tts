@@ -395,7 +395,7 @@ func (s *Session) LLMConsumer() {
 				s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMDone, Data: nil})
 				// 获取完整响应（此时才转为 string）
 				finalResponse := s.FullResponse.String()
-				if s.callback != nil {
+				if s.callback != nil && finalResponse != "" {
 					// s.callback.OnEventResult(s.ctx, eventbus.EventLLMResponseComplete, finalResponse, func(msgType SessionMessageType, data map[string]any) {
 					// 	s.sendJsonMap(msgType, data)
 					// })
@@ -582,7 +582,9 @@ func (s *Session) AudioRecognitionConsumer() {
 		},
 		func(data string) {
 			if data == "" {
+				s.sendJson(SessionText, "event", "no_asr_result")
 				s.cancel()
+
 				return
 			}
 
