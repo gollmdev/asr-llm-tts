@@ -10,17 +10,19 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type PrintHandler struct {
-	OnTextFunc func(delta string)
+	// OnTextFunc func(delta string)
 }
 
 func (h *PrintHandler) OnText(delta string) {
 	// fmt.Print(delta)
-	if h.OnTextFunc != nil {
-		h.OnTextFunc(delta)
-	}
+	// if h.OnTextFunc != nil {
+	// 	h.OnTextFunc(delta)
+	// }
 }
 
 func (h *PrintHandler) OnToolCallDelta(id, name, args string) {
@@ -60,27 +62,45 @@ type ToolCallState struct {
 
 // define clinet struct and methods to call llm provider, e.g. dashscope
 type LLMStream struct {
-	url            string
-	apiKey         string
-	model          string
-	tools          []map[string]any
-	callback       StreamEventCallback
+	url    string
+	apiKey string
+	model  string
+	tools  []map[string]any
+	// callback       StreamEventCallback
 	currentMessage []map[string]any
 	toolCalls      map[string]*ToolCallState
+	message        chan *StreamChatMessage
+	ctx            context.Context
+	g              *errgroup.Group
+	cancel         context.CancelFunc
+	started        bool
+}
+type ChatModelConfig struct {
+	Model string
+	Tools []map[string]any
+	Ctx   context.Context
+	G     *errgroup.Group
 }
 
-func NewLLMStream(model string,
-	tools []map[string]any,
-	OnTextFunc func(delta string)) *LLMStream {
+// model string,
+// tools []map[string]any,
+// OnTextFunc func(delta string)
+func NewQwenChatModel(config *ChatModelConfig) *LLMStream {
+	ctx, cancel := context.WithCancel(config.Ctx)
 	return &LLMStream{
 		url:    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
 		apiKey: os.Getenv("DASHSCOPE_API_KEY"),
-		model:  model,
-		tools:  tools,
-		callback: &PrintHandler{
-			OnTextFunc: OnTextFunc,
-		},
+		model:  config.Model,
+		tools:  config.Tools,
+		// callback: &PrintHandler{
+		// 	// OnTextFunc: OnTextFunc,
+		// },
 		currentMessage: make([]map[string]any, 0),
+		message:        make(chan *StreamChatMessage, 8),
+		ctx:            ctx,
+		cancel:         cancel,
+		g:              config.G,
+		started:        false,
 		// toolCalls:      make(map[string]*ToolCallState),
 	}
 }
@@ -121,19 +141,24 @@ func (l *LLMStream) buildRequest(ctx context.Context, message []map[string]any, 
 
 }
 
-func (l *LLMStream) Call(ctx context.Context, message []map[string]any, stream bool) error {
-
+func (l *LLMStream) Call(message []map[string]any, stream bool) error {
+	// g, ctx := errgroup.WithContext(ctx)
 	client := &http.Client{Timeout: 0}
 	l.currentMessage = append(l.currentMessage, message...)
+	defer log.Println("llm-life: llm call done")
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-
+		if !l.started {
+			return fmt.Errorf("llm stream not started")
 		}
+		// select {
+		// case <-ctx.Done():
+
+		// 	return ctx.Err()
+		// default:
+
+		// }
 		l.toolCalls = make(map[string]*ToolCallState)
-		req, err := l.buildRequest(ctx, l.currentMessage, stream)
+		req, err := l.buildRequest(l.ctx, l.currentMessage, stream)
 		if err != nil {
 			return err
 		}
@@ -142,6 +167,7 @@ func (l *LLMStream) Call(ctx context.Context, message []map[string]any, stream b
 			return err
 		}
 		defer resp.Body.Close()
+		// defer req.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			// Read body for debugging (limit size to avoid huge dumps)
@@ -150,9 +176,10 @@ func (l *LLMStream) Call(ctx context.Context, message []map[string]any, stream b
 			log.Printf("request failed: %s - %s", resp.Status, string(data))
 			return fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
 		}
+		// l.callback,
+		reader := NewChatStreamReader(resp.Body, l.toolCalls, l.message, stream)
+		reader.ReadLoop()
 
-		reader := NewChatStreamReader(resp.Body, l.callback, l.toolCalls, stream)
-		reader.Run(ctx)
 		if len(l.toolCalls) != 0 {
 			i := 0
 			for id, call := range l.toolCalls {
@@ -191,6 +218,31 @@ func (l *LLMStream) Call(ctx context.Context, message []map[string]any, stream b
 			return nil
 		}
 		// return nil
+	}
+
+}
+func (l *LLMStream) Stream(message []map[string]any) {
+	l.started = true
+	l.g.Go(func() error {
+		return l.Call(message, true)
+	})
+}
+func (l *LLMStream) Recv() (*StreamChatMessage, error) {
+
+	for {
+		select {
+		case <-l.ctx.Done():
+			l.started = false
+			l.cancel() // 取消 context，通知 Call 方法退出
+			return nil, l.ctx.Err()
+		case msg, ok := <-l.message:
+			if !ok {
+				l.started = false
+				l.cancel() // 取消 context，通知 Call 方法退出
+				return nil, io.EOF
+			}
+			return msg, nil
+		}
 	}
 
 }

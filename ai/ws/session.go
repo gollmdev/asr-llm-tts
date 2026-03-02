@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"io"
 
 	// "gin-quickstart/pkg/ai/provider/asr"
 	// "gin-quickstart/pkg/ai/provider/llm"
@@ -84,9 +85,9 @@ type Callback interface {
 
 func NewSession(ctx context.Context, callback Callback) *Session {
 	// ctx, cancel := context.WithCancel(context.Background())
-	ctx, cancel := context.WithCancel(ctx)
+	baseCtx, cancel := context.WithCancel(ctx)
 	// gCtx, gCancel := context.WithCancel(context.Background())
-	g, ctx := errgroup.WithContext(ctx) //  关键：绑定 context
+	g, ctx := errgroup.WithContext(baseCtx) //  关键：绑定 context
 
 	s := &Session{
 		ctx:    ctx,
@@ -510,36 +511,78 @@ func (s *Session) LLMConsumer() {
 //	}
 func (s *Session) LLMStream(input []map[string]any, stream bool, onChunkReceived func(string)) {
 	// cb := &PrintHandler{}
-	llm := llm.NewLLMStream(
-		"qwen-plus",
-		[]map[string]any{
-			{
-				"type": "function",
-				"function": map[string]any{
-					"name":        "get_weather",
-					"description": "当你想查询指定城市的天气时非常有用。",
-					"parameters": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"location": map[string]string{
-								"type":        "string",
-								"description": "城市或县区，比如北京市、杭州市、余杭区等。",
-							},
+	// llm := llm.NewQwenChatModel(
+	// 	"qwen-plus",
+	// 	[]map[string]any{
+	// {
+	// 	"type": "function",
+	// 	"function": map[string]any{
+	// 		"name":        "get_weather",
+	// 		"description": "当你想查询指定城市的天气时非常有用。",
+	// 		"parameters": map[string]any{
+	// 			"type": "object",
+	// 			"properties": map[string]any{
+	// 				"location": map[string]string{
+	// 					"type":        "string",
+	// 					"description": "城市或县区，比如北京市、杭州市、余杭区等。",
+	// 				},
+	// 			},
+	// 			"required": []string{"location"},
+	// 		},
+	// 	},
+	// },
+	// 	}, func(delta string) {
+	// 		onChunkReceived(delta)
+	// 	},
+	// )
+	tools := []map[string]any{
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "get_weather",
+				"description": "当你想查询指定城市的天气时非常有用。",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"location": map[string]string{
+							"type":        "string",
+							"description": "城市或县区，比如北京市、杭州市、余杭区等。",
 						},
-						"required": []string{"location"},
 					},
+					"required": []string{"location"},
 				},
 			},
-		}, func(delta string) {
-			onChunkReceived(delta)
 		},
-	)
+	}
+	llm := llm.NewQwenChatModel(&llm.ChatModelConfig{
+		Model: "qwen-plus",
+		Tools: tools,
+		Ctx:   s.ctx,
+		G:     s.g,
+	})
 	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	// defer cancel()
+	llm.Stream(input)
+
 	if s.callback != nil {
 
-		llm.Call(s.ctx, input, stream)
-		return
+		// llm.Call(s.ctx, input, stream)
+		defer log.Println("llm-life: llm recv done")
+		for {
+			msg, err := llm.Recv()
+			if err != nil {
+				if err != io.EOF {
+					log.Println("LLMStream error:", err)
+				}
+				break
+			}
+			if msg != nil {
+				if msg.Event == "OnText" && msg.Content != nil {
+					onChunkReceived(*msg.Content)
+				}
+			}
+		}
+
 	}
 	// else {
 	// 	llm.Call(ctx, []map[string]any{

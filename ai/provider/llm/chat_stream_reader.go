@@ -2,10 +2,11 @@ package llm
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"strings"
+	"sync"
 )
 
 type StreamEventCallback interface {
@@ -17,21 +18,31 @@ type StreamEventCallback interface {
 	OnUsage(usage map[string]any)
 }
 type ChatStreamReader struct {
-	reader    *bufio.Reader
-	handler   StreamEventCallback
+	reader *bufio.Reader
+	// handler   StreamEventCallback
 	toolCalls map[string]*ToolCallState
 	stream    bool
+	message   chan *StreamChatMessage
+	closeOnce sync.Once
+
 	// OnToolCallFinish func(toolCalls map[string]*ToolCallState)
 
 }
 
-func NewChatStreamReader(r io.Reader, h StreamEventCallback, toolCalls map[string]*ToolCallState, stream bool) *ChatStreamReader {
+// h StreamEventCallback,
+func NewChatStreamReader(r io.Reader, toolCalls map[string]*ToolCallState, message chan *StreamChatMessage, stream bool) *ChatStreamReader {
 	return &ChatStreamReader{
-		reader:    bufio.NewReader(r),
-		handler:   h,
+		reader: bufio.NewReader(r),
+		// handler:   h,
 		toolCalls: toolCalls,
 		stream:    stream,
+		message:   message,
 	}
+}
+func (c *ChatStreamReader) Close() {
+	c.closeOnce.Do(func() {
+		close(c.message)
+	})
 }
 
 //	{
@@ -50,26 +61,32 @@ func NewChatStreamReader(r io.Reader, h StreamEventCallback, toolCalls map[strin
 //	    "model": "qwen-plus",
 //	    "id": "chatcmpl-8388ad93-bab4-9f14-87ba-6289f3b144c9"
 //	}
-func (c *ChatStreamReader) Run(ctx context.Context) {
-	defer c.handler.OnDone()
+func (c *ChatStreamReader) ReadLoop() {
+	// defer c.handler.OnDone()
+	c.message <- &StreamChatMessage{Event: "OnDone", Content: nil} // send an empty message to indicate stream start
 
 	var currentToolCallID string
-
+	defer log.Println("llm-life: llm read loop done")
 	for {
-		select {
-		case <-ctx.Done():
-			c.handler.OnError(ctx.Err())
-			return
-		default:
-		}
+		// select {
+		// case <-ctx.Done():
+		// 	c.handler.OnError(ctx.Err())
+		// 	return
+		// default:
+		// }
 
 		if c.stream {
 			line, err := c.reader.ReadString('\n')
 
 			if err != nil {
-				if err != io.EOF {
-					c.handler.OnError(err)
-				}
+				// if err != io.EOF {
+				// 	// c.handler.OnError(err)
+
+				// 	// c.message <- &StreamChatMessage{Event: "OnError", Content: nil, err: err}
+				// }
+				log.Println("llm-life: ChatStreamReader error:", err)
+				// close(c.message)
+				c.Close()
 				return
 			}
 
@@ -84,6 +101,8 @@ func (c *ChatStreamReader) Run(ctx context.Context) {
 
 			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if payload == "[DONE]" {
+				// close(c.message)
+				c.Close()
 				return
 			}
 
@@ -93,7 +112,8 @@ func (c *ChatStreamReader) Run(ctx context.Context) {
 			}
 
 			if usage, ok := obj["usage"].(map[string]any); ok {
-				c.handler.OnUsage(usage)
+				// c.handler.OnUsage(usage)
+				c.message <- &StreamChatMessage{Event: "OnUsage", usage: &usage}
 				continue
 			}
 
@@ -106,7 +126,8 @@ func (c *ChatStreamReader) Run(ctx context.Context) {
 
 			// finish_reason
 			if fr, ok := choice["finish_reason"].(string); ok && fr == "tool_calls" {
-				c.handler.OnToolCallFinish(c.toolCalls)
+				// c.handler.OnToolCallFinish(c.toolCalls)
+				c.message <- &StreamChatMessage{Event: "OnToolCallFinish", toolCalls: &c.toolCalls}
 				// if c.OnToolCallFinish != nil {
 				// 	c.OnToolCallFinish(c.toolCalls)
 				// }
@@ -115,7 +136,8 @@ func (c *ChatStreamReader) Run(ctx context.Context) {
 			message, ok := choice["message"].(map[string]any)
 			if ok {
 				if content, ok := message["content"].(string); ok {
-					c.handler.OnText(content)
+					// c.handler.OnText(content)
+					c.message <- &StreamChatMessage{Event: "OnText", Content: &content}
 				}
 			}
 			delta, ok := choice["delta"].(map[string]any)
@@ -142,17 +164,19 @@ func (c *ChatStreamReader) Run(ctx context.Context) {
 							}
 							if args, ok := fn["arguments"].(string); ok {
 								state.Arguments.WriteString(args)
-								c.handler.OnToolCallDelta(
-									currentToolCallID,
-									state.Name,
-									args,
-								)
+								// c.message <- &StreamChatMessage{Event: "OnToolCallDelta", Content: &content}
+								// c.handler.OnToolCallDelta(
+								// 	currentToolCallID,
+								// 	state.Name,
+								// 	args,
+								// )
 							}
 						}
 					}
 				} else if content, ok := delta["content"].(string); ok {
 					// 1️ 普通文本
-					c.handler.OnText(content)
+					// c.handler.OnText(content)
+					c.message <- &StreamChatMessage{Event: "OnText", Content: &content}
 					continue
 				}
 			}
@@ -177,7 +201,8 @@ func (c *ChatStreamReader) Run(ctx context.Context) {
 			message, ok := choice["message"].(map[string]any)
 			if ok {
 				if content, ok := message["content"].(string); ok {
-					c.handler.OnText(content)
+					// c.handler.OnText(content)
+					c.message <- &StreamChatMessage{Event: "OnText", Content: &content}
 				}
 			}
 			return
