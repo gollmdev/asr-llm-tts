@@ -342,17 +342,34 @@ func (s *Session) LLMTaskConsumer() func() {
 				}
 				// log.Println("LLMTaskConsumer received message:", message.Data.(string))
 
-				s.LLMStream(message.Data.([]map[string]any), false, func(chunk string) {
-					// log.Println("LLMStream received chunk:", chunk)
-					// s.sendJson(SessionText, "message", chunk)
-					// s.FullResponse.WriteString(chunk)
-					// s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
-					if s.callback != nil {
-						s.callback.OnEventResult(s.ctx, message.Type, chunk, func(msgType SessionMessageType, data map[string]any) {
+				// s.LLMStream(message.Data.([]map[string]any), false, func(chunk string) {
+				// 	// log.Println("LLMStream received chunk:", chunk)
+				// 	// s.sendJson(SessionText, "message", chunk)
+				// 	// s.FullResponse.WriteString(chunk)
+				// 	// s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
+				// 	if s.callback != nil {
+				// 		s.callback.OnEventResult(s.ctx, message.Type, chunk, func(msgType SessionMessageType, data map[string]any) {
+				// 			s.sendJsonMap(msgType, data)
+				// 		})
+				// 	}
+				// })
+				llm := llm.NewQwenChatModel(&llm.ChatModelConfig{
+					Model: "qwen-plus",
+					Tools: []map[string]any{},
+					Ctx:   s.ctx,
+					G:     sub.G,
+				})
+
+				msg, err := llm.Generate(message.Data.([]map[string]any))
+				if err != nil {
+					log.Println("LLMStream error:", err)
+				} else {
+					if msg != nil && msg.Content != nil && s.callback != nil {
+						s.callback.OnEventResult(s.ctx, message.Type, *msg.Content, func(msgType SessionMessageType, data map[string]any) {
 							s.sendJsonMap(msgType, data)
 						})
 					}
-				})
+				}
 
 				// s.sendJson(SessionText, "message", message.Data.(string))
 			}
@@ -387,12 +404,62 @@ func (s *Session) LLMConsumer() {
 					})
 				}
 				input := s.callback.GetMessage(message.Data.(string))
-				s.LLMStream(input, true, func(chunk string) {
-					// log.Println("LLMStream received chunk:", chunk)
-					s.sendJson(SessionText, "message", chunk)
-					s.FullResponse.WriteString(chunk)
-					s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
+				// s.LLMStream(input, true, func(chunk string) {
+				// 	// log.Println("LLMStream received chunk:", chunk)
+				// 	s.sendJson(SessionText, "message", chunk)
+				// 	s.FullResponse.WriteString(chunk)
+				// 	s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
+				// })
+				tools := []map[string]any{
+					{
+						"type": "function",
+						"function": map[string]any{
+							"name":        "get_weather",
+							"description": "当你想查询指定城市的天气时非常有用。",
+							"parameters": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"location": map[string]string{
+										"type":        "string",
+										"description": "城市或县区，比如北京市、杭州市、余杭区等。",
+									},
+								},
+								"required": []string{"location"},
+							},
+						},
+					},
+				}
+				llm := llm.NewQwenChatModel(&llm.ChatModelConfig{
+					Model: "qwen-plus",
+					Tools: tools,
+					Ctx:   s.ctx,
+					G:     sub.G,
 				})
+
+				llm.Stream(input)
+
+				if s.callback != nil {
+					defer log.Println("llm-life: llm recv done")
+					for {
+						msg, err := llm.Recv()
+						if err != nil {
+							if err != io.EOF {
+								log.Println("LLMStream error:", err)
+							}
+							break
+						}
+						if msg != nil {
+							if msg.Event == "OnText" && msg.Content != nil {
+								// onChunkReceived(*msg.Content)
+								chunk := *msg.Content
+								s.sendJson(SessionText, "message", chunk)
+								s.FullResponse.WriteString(chunk)
+								s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
+							}
+						}
+					}
+
+				}
 
 				s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMDone, Data: nil})
 				// 获取完整响应（此时才转为 string）
@@ -509,87 +576,86 @@ func (s *Session) LLMConsumer() {
 //		// s.cancel()
 //		// 在 LLM 流式返回完毕后，还可以执行其他逻辑，比如 TTS 转换等
 //	}
-func (s *Session) LLMStream(input []map[string]any, stream bool, onChunkReceived func(string)) {
-	// cb := &PrintHandler{}
-	// llm := llm.NewQwenChatModel(
-	// 	"qwen-plus",
-	// 	[]map[string]any{
-	// {
-	// 	"type": "function",
-	// 	"function": map[string]any{
-	// 		"name":        "get_weather",
-	// 		"description": "当你想查询指定城市的天气时非常有用。",
-	// 		"parameters": map[string]any{
-	// 			"type": "object",
-	// 			"properties": map[string]any{
-	// 				"location": map[string]string{
-	// 					"type":        "string",
-	// 					"description": "城市或县区，比如北京市、杭州市、余杭区等。",
-	// 				},
-	// 			},
-	// 			"required": []string{"location"},
-	// 		},
-	// 	},
-	// },
-	// 	}, func(delta string) {
-	// 		onChunkReceived(delta)
-	// 	},
-	// )
-	tools := []map[string]any{
-		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "get_weather",
-				"description": "当你想查询指定城市的天气时非常有用。",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"location": map[string]string{
-							"type":        "string",
-							"description": "城市或县区，比如北京市、杭州市、余杭区等。",
-						},
-					},
-					"required": []string{"location"},
-				},
-			},
-		},
-	}
-	llm := llm.NewQwenChatModel(&llm.ChatModelConfig{
-		Model: "qwen-plus",
-		Tools: tools,
-		Ctx:   s.ctx,
-		G:     s.g,
-	})
-	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	// defer cancel()
-	llm.Stream(input)
+// func (s *Session) LLMStream(input []map[string]any, stream bool, onChunkReceived func(string)) {
+// 	// cb := &PrintHandler{}
+// 	// llm := llm.NewQwenChatModel(
+// 	// 	"qwen-plus",
+// 	// 	[]map[string]any{
+// 	// {
+// 	// 	"type": "function",
+// 	// 	"function": map[string]any{
+// 	// 		"name":        "get_weather",
+// 	// 		"description": "当你想查询指定城市的天气时非常有用。",
+// 	// 		"parameters": map[string]any{
+// 	// 			"type": "object",
+// 	// 			"properties": map[string]any{
+// 	// 				"location": map[string]string{
+// 	// 					"type":        "string",
+// 	// 					"description": "城市或县区，比如北京市、杭州市、余杭区等。",
+// 	// 				},
+// 	// 			},
+// 	// 			"required": []string{"location"},
+// 	// 		},
+// 	// 	},
+// 	// },
+// 	// 	}, func(delta string) {
+// 	// 		onChunkReceived(delta)
+// 	// 	},
+// 	// )
+// 	tools := []map[string]any{
+// 		{
+// 			"type": "function",
+// 			"function": map[string]any{
+// 				"name":        "get_weather",
+// 				"description": "当你想查询指定城市的天气时非常有用。",
+// 				"parameters": map[string]any{
+// 					"type": "object",
+// 					"properties": map[string]any{
+// 						"location": map[string]string{
+// 							"type":        "string",
+// 							"description": "城市或县区，比如北京市、杭州市、余杭区等。",
+// 						},
+// 					},
+// 					"required": []string{"location"},
+// 				},
+// 			},
+// 		},
+// 	}
+// 	llm := llm.NewQwenChatModel(&llm.ChatModelConfig{
+// 		Model: "qwen-plus",
+// 		Tools: tools,
+// 		Ctx:   s.ctx,
+// 		G:     sub.G,
+// 	})
 
-	if s.callback != nil {
+// 	llm.Stream(input)
 
-		// llm.Call(s.ctx, input, stream)
-		defer log.Println("llm-life: llm recv done")
-		for {
-			msg, err := llm.Recv()
-			if err != nil {
-				if err != io.EOF {
-					log.Println("LLMStream error:", err)
-				}
-				break
-			}
-			if msg != nil {
-				if msg.Event == "OnText" && msg.Content != nil {
-					onChunkReceived(*msg.Content)
-				}
-			}
-		}
+// 	if s.callback != nil {
 
-	}
-	// else {
-	// 	llm.Call(ctx, []map[string]any{
-	// 		{"role": "user", "content": inputText},
-	// 	}, true)
-	// }
-}
+// 		// llm.Call(s.ctx, input, stream)
+// 		defer log.Println("llm-life: llm recv done")
+// 		for {
+// 			msg, err := llm.Recv()
+// 			if err != nil {
+// 				if err != io.EOF {
+// 					log.Println("LLMStream error:", err)
+// 				}
+// 				break
+// 			}
+// 			if msg != nil {
+// 				if msg.Event == "OnText" && msg.Content != nil {
+// 					onChunkReceived(*msg.Content)
+// 				}
+// 			}
+// 		}
+
+// 	}
+// 	// else {
+// 	// 	llm.Call(ctx, []map[string]any{
+// 	// 		{"role": "user", "content": inputText},
+// 	// 	}, true)
+// 	// }
+// }
 
 // func LLMStream2(inputText string, ctx context.Context, onChunkReceived func(string)) {
 // 	// 假设这是流式调用 LLM API 并且逐步接收响应的实现
@@ -642,7 +708,7 @@ func (s *Session) AudioRecognitionConsumer() {
 
 	s.g.Go(func() error {
 		defer unsubscribe()
-		err := asrStream.Call(s.g, sub.Ctx)
+		err := asrStream.Call(sub.G, sub.Ctx)
 		// 这个 error 被上层（errgroup.WithContext）接住后，统一 cancel 了共享的 context
 		if err != nil {
 			log.Println("ASRStream error:", err)

@@ -3,6 +3,7 @@ package llm
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -30,12 +31,11 @@ type ChatStreamReader struct {
 }
 
 // h StreamEventCallback,
-func NewChatStreamReader(r io.Reader, toolCalls map[string]*ToolCallState, message chan *StreamChatMessage, stream bool) *ChatStreamReader {
+func NewChatStreamReader(r io.Reader, toolCalls map[string]*ToolCallState, message chan *StreamChatMessage) *ChatStreamReader {
 	return &ChatStreamReader{
 		reader: bufio.NewReader(r),
 		// handler:   h,
 		toolCalls: toolCalls,
-		stream:    stream,
 		message:   message,
 	}
 }
@@ -61,6 +61,39 @@ func (c *ChatStreamReader) Close() {
 //	    "model": "qwen-plus",
 //	    "id": "chatcmpl-8388ad93-bab4-9f14-87ba-6289f3b144c9"
 //	}
+
+func (c *ChatStreamReader) Read() (*StreamChatMessage, error) {
+	defer c.Close()
+	line, err := c.reader.ReadString('\n')
+	if err != nil {
+		if err != io.EOF {
+			// c.handler.OnError(err)
+			return nil, err
+		}
+		// log.Println("llm-life: ChatStreamReader error:", err)
+		//
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		return nil, err
+	}
+	choices, ok := obj["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		return nil, fmt.Errorf("invalid response: no choices")
+	}
+	choice := choices[0].(map[string]any)
+
+	message, ok := choice["message"].(map[string]any)
+	if ok {
+		if content, ok := message["content"].(string); ok {
+			// c.handler.OnText(content)
+			return &StreamChatMessage{Event: "OnText", Content: &content}, nil
+		}
+	}
+	return nil, nil
+
+}
+
 func (c *ChatStreamReader) ReadLoop() {
 	// defer c.handler.OnDone()
 	c.message <- &StreamChatMessage{Event: "OnDone", Content: nil} // send an empty message to indicate stream start
@@ -75,137 +108,109 @@ func (c *ChatStreamReader) ReadLoop() {
 		// default:
 		// }
 
-		if c.stream {
-			line, err := c.reader.ReadString('\n')
+		line, err := c.reader.ReadString('\n')
 
-			if err != nil {
-				// if err != io.EOF {
-				// 	// c.handler.OnError(err)
+		if err != nil {
+			// if err != io.EOF {
+			// 	// c.handler.OnError(err)
 
-				// 	// c.message <- &StreamChatMessage{Event: "OnError", Content: nil, err: err}
-				// }
-				log.Println("llm-life: ChatStreamReader error:", err)
-				// close(c.message)
-				c.Close()
-				return
+			// 	// c.message <- &StreamChatMessage{Event: "OnError", Content: nil, err: err}
+			// }
+			log.Println("llm-life: ChatStreamReader error:", err)
+			// close(c.message)
+			c.Close()
+			return
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			// close(c.message)
+			c.Close()
+			return
+		}
+
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(payload), &obj); err != nil {
+			continue
+		}
+
+		if usage, ok := obj["usage"].(map[string]any); ok {
+			// c.handler.OnUsage(usage)
+			c.message <- &StreamChatMessage{Event: "OnUsage", usage: &usage}
+			continue
+		}
+
+		choices, ok := obj["choices"].([]any)
+		if !ok || len(choices) == 0 {
+			continue
+		}
+
+		choice := choices[0].(map[string]any)
+
+		// finish_reason
+		if fr, ok := choice["finish_reason"].(string); ok && fr == "tool_calls" {
+			// c.handler.OnToolCallFinish(c.toolCalls)
+			c.message <- &StreamChatMessage{Event: "OnToolCallFinish", toolCalls: &c.toolCalls}
+			// if c.OnToolCallFinish != nil {
+			// 	c.OnToolCallFinish(c.toolCalls)
+			// }
+			return
+		}
+		message, ok := choice["message"].(map[string]any)
+		if ok {
+			if content, ok := message["content"].(string); ok {
+				// c.handler.OnText(content)
+				c.message <- &StreamChatMessage{Event: "OnText", Content: &content}
 			}
+		}
+		delta, ok := choice["delta"].(map[string]any)
+		if ok {
+			// 2️ tool_calls
+			if tcList, ok := delta["tool_calls"].([]any); ok {
+				for _, tc := range tcList {
+					tcMap := tc.(map[string]any)
 
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
+					id, _ := tcMap["id"].(string)
+					if id != "" {
+						currentToolCallID = id
+					}
 
-			if !strings.HasPrefix(line, "data:") {
-				continue
-			}
+					state := c.toolCalls[currentToolCallID]
+					if state == nil {
+						state = &ToolCallState{}
+						c.toolCalls[currentToolCallID] = state
+					}
 
-			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			if payload == "[DONE]" {
-				// close(c.message)
-				c.Close()
-				return
-			}
-
-			var obj map[string]any
-			if err := json.Unmarshal([]byte(payload), &obj); err != nil {
-				continue
-			}
-
-			if usage, ok := obj["usage"].(map[string]any); ok {
-				// c.handler.OnUsage(usage)
-				c.message <- &StreamChatMessage{Event: "OnUsage", usage: &usage}
-				continue
-			}
-
-			choices, ok := obj["choices"].([]any)
-			if !ok || len(choices) == 0 {
-				continue
-			}
-
-			choice := choices[0].(map[string]any)
-
-			// finish_reason
-			if fr, ok := choice["finish_reason"].(string); ok && fr == "tool_calls" {
-				// c.handler.OnToolCallFinish(c.toolCalls)
-				c.message <- &StreamChatMessage{Event: "OnToolCallFinish", toolCalls: &c.toolCalls}
-				// if c.OnToolCallFinish != nil {
-				// 	c.OnToolCallFinish(c.toolCalls)
-				// }
-				return
-			}
-			message, ok := choice["message"].(map[string]any)
-			if ok {
-				if content, ok := message["content"].(string); ok {
-					// c.handler.OnText(content)
-					c.message <- &StreamChatMessage{Event: "OnText", Content: &content}
-				}
-			}
-			delta, ok := choice["delta"].(map[string]any)
-			if ok {
-				// 2️ tool_calls
-				if tcList, ok := delta["tool_calls"].([]any); ok {
-					for _, tc := range tcList {
-						tcMap := tc.(map[string]any)
-
-						id, _ := tcMap["id"].(string)
-						if id != "" {
-							currentToolCallID = id
+					if fn, ok := tcMap["function"].(map[string]any); ok {
+						if name, ok := fn["name"].(string); ok && state.Name == "" {
+							state.Name = name
 						}
-
-						state := c.toolCalls[currentToolCallID]
-						if state == nil {
-							state = &ToolCallState{}
-							c.toolCalls[currentToolCallID] = state
-						}
-
-						if fn, ok := tcMap["function"].(map[string]any); ok {
-							if name, ok := fn["name"].(string); ok && state.Name == "" {
-								state.Name = name
-							}
-							if args, ok := fn["arguments"].(string); ok {
-								state.Arguments.WriteString(args)
-								// c.message <- &StreamChatMessage{Event: "OnToolCallDelta", Content: &content}
-								// c.handler.OnToolCallDelta(
-								// 	currentToolCallID,
-								// 	state.Name,
-								// 	args,
-								// )
-							}
+						if args, ok := fn["arguments"].(string); ok {
+							state.Arguments.WriteString(args)
+							// c.message <- &StreamChatMessage{Event: "OnToolCallDelta", Content: &content}
+							// c.handler.OnToolCallDelta(
+							// 	currentToolCallID,
+							// 	state.Name,
+							// 	args,
+							// )
 						}
 					}
-				} else if content, ok := delta["content"].(string); ok {
-					// 1️ 普通文本
-					// c.handler.OnText(content)
-					c.message <- &StreamChatMessage{Event: "OnText", Content: &content}
-					continue
 				}
-			}
-		} else {
-			line, _ := c.reader.ReadString('\n')
-			// if err != nil {
-			// 	if err != io.EOF {
-			// 		c.handler.OnError(err)
-			// 	}
-			// 	return
-			// }
-			var obj map[string]any
-			if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			} else if content, ok := delta["content"].(string); ok {
+				// 1️ 普通文本
+				// c.handler.OnText(content)
+				c.message <- &StreamChatMessage{Event: "OnText", Content: &content}
 				continue
 			}
-			choices, ok := obj["choices"].([]any)
-			if !ok || len(choices) == 0 {
-				continue
-			}
-			choice := choices[0].(map[string]any)
-
-			message, ok := choice["message"].(map[string]any)
-			if ok {
-				if content, ok := message["content"].(string); ok {
-					// c.handler.OnText(content)
-					c.message <- &StreamChatMessage{Event: "OnText", Content: &content}
-				}
-			}
-			return
 		}
 
 	}

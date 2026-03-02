@@ -141,14 +141,14 @@ func (l *LLMStream) buildRequest(ctx context.Context, message []map[string]any, 
 
 }
 
-func (l *LLMStream) Call(message []map[string]any, stream bool) error {
+func (l *LLMStream) Call(message []map[string]any, stream bool) (*StreamChatMessage, error) {
 	// g, ctx := errgroup.WithContext(ctx)
 	client := &http.Client{Timeout: 0}
 	l.currentMessage = append(l.currentMessage, message...)
 	defer log.Println("llm-life: llm call done")
 	for {
 		if !l.started {
-			return fmt.Errorf("llm stream not started")
+			return nil, fmt.Errorf("llm stream not started")
 		}
 		// select {
 		// case <-ctx.Done():
@@ -160,11 +160,11 @@ func (l *LLMStream) Call(message []map[string]any, stream bool) error {
 		l.toolCalls = make(map[string]*ToolCallState)
 		req, err := l.buildRequest(l.ctx, l.currentMessage, stream)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer resp.Body.Close()
 		// defer req.Body.Close()
@@ -174,11 +174,21 @@ func (l *LLMStream) Call(message []map[string]any, stream bool) error {
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			// panic()
 			log.Printf("request failed: %s - %s", resp.Status, string(data))
-			return fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
+			return nil, fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
 		}
 		// l.callback,
-		reader := NewChatStreamReader(resp.Body, l.toolCalls, l.message, stream)
-		reader.ReadLoop()
+		reader := NewChatStreamReader(resp.Body, l.toolCalls, l.message)
+		if stream {
+			reader.ReadLoop()
+		} else {
+			msg, err := reader.Read()
+			if err != nil {
+				return nil, err
+			}
+			if msg != nil {
+				return msg, nil
+			}
+		}
 
 		if len(l.toolCalls) != 0 {
 			i := 0
@@ -215,16 +225,26 @@ func (l *LLMStream) Call(message []map[string]any, stream bool) error {
 			// no tool calls, finish after first response
 			// return nil
 		} else {
-			return nil
+			return nil, nil
 		}
 		// return nil
 	}
 
 }
+func (l *LLMStream) Generate(message []map[string]any) (*StreamChatMessage, error) {
+	l.started = true
+	msg, err := l.Call(message, false)
+	l.started = false
+	return msg, err
+
+}
 func (l *LLMStream) Stream(message []map[string]any) {
 	l.started = true
 	l.g.Go(func() error {
-		return l.Call(message, true)
+		return func() error {
+			_, err := l.Call(message, true)
+			return err
+		}()
 	})
 }
 func (l *LLMStream) Recv() (*StreamChatMessage, error) {
