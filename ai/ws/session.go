@@ -82,8 +82,9 @@ type Callback interface {
 	GetMessage(text string) []map[string]any
 }
 
-func NewSession(callback Callback) *Session {
-	ctx, cancel := context.WithCancel(context.Background())
+func NewSession(ctx context.Context, callback Callback) *Session {
+	// ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	// gCtx, gCancel := context.WithCancel(context.Background())
 	g, ctx := errgroup.WithContext(ctx) //  关键：绑定 context
 
@@ -746,6 +747,14 @@ func (s *Session) sendSafe(msgType SessionMessageType, data []byte) {
 // 	return s.output
 // }
 
+// func (s *Session) Recv() (*SessionMessage, error) {
+// 	msg, ok := <-s.output
+// 	if !ok {
+// 		return nil, io.EOF
+// 	}
+// 	return &msg, nil
+
+// }
 func (s *Session) Close() {
 
 	// _ = s.g.Wait() // 等待所有协程退出

@@ -344,7 +344,7 @@ func (r *SpeechSynthesizer) startPayload() map[string]any {
 				"format":      r.aformat.Format,
 				"sample_rate": r.aformat.SampleRate,
 				"volume":      r.volume,
-				"rate":        1,
+				"rate":        1.2,
 				"pitch":       r.pitchRate,
 				// 如果enable_ssml设为true，只允许发送一次continue-task指令，否则会报错“Text request limit violated, expected 1.”
 				"enable_ssml": r.synthType,

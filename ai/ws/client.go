@@ -42,9 +42,10 @@ type Client struct {
 	registerCh chan bool
 }
 
-func NewClient(hub *Hub, conn *websocket.Conn, session *Session, userId int64) *Client {
+func NewClient(hub *Hub, conn *websocket.Conn, callback Callback, userId int64) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	g, ctx := errgroup.WithContext(ctx)
+	session := NewSession(ctx, callback)
 
 	return &Client{
 		Hub:        hub,
@@ -99,19 +100,22 @@ func (c *Client) Start() {
 
 	go func() {
 		if err := c.g.Wait(); err != nil {
-			c.Session.cancel()
+			// c.Session.cancel()
 			log.Println("ws-conn: error client closed:", err)
 		}
-		c.Close()
+		// c.Close()
+		c.Hub.unregister <- c
+		log.Println("ws-conn: client closed")
 	}()
 }
 
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
 		c.Session.Close()
+		// c.Close()
 		c.Conn.Close()
-		c.Hub.unregister <- c
-		log.Println("ws-conn: client closed")
+		// c.Hub.unregister <- c
+		// log.Println("ws-conn: client closed")
 		// c.Session.Close()
 		// c.Conn.Close()
 	})
@@ -155,21 +159,22 @@ func (c *Client) ReadPump() error {
 	// c.Session.LLMTaskConsumer() // 启动 LLM 任务消费者
 
 	for {
-		select {
-		// case <-c.session.Done:
-		// 	log.Println("Session processing done, exiting readPump.")
-		// 	return
-		case <-c.ctx.Done():
-			log.Println("ws-conn: ws-conn: Client context done, exiting readPump.")
-			return c.ctx.Err()
-		case <-c.Session.ctx.Done():
-			log.Println("Session is closed, exiting readPump.")
-			return nil
-		default:
-			// broadcast the received message to all clients
-			// c.hub.broadcast <- message
+		// select {
+		// // case <-c.session.Done:
+		// // 	log.Println("Session processing done, exiting readPump.")
+		// // 	return
+		// case <-c.ctx.Done():
+		// 	log.Println("ws-conn: ws-conn: Client context done, exiting readPump.")
+		// 	return c.ctx.Err()
+		// case <-c.Session.ctx.Done():
+		// 	log.Println("Session is closed, exiting readPump.")
+		// 	return nil
+		// default:
+		// 	// broadcast the received message to all clients
+		// 	// c.hub.broadcast <- message
 
-		}
+		// }
+		// 一直读取消息，直到发生错误（如连接关闭）
 		msgType, message, err := c.Conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -178,7 +183,8 @@ func (c *Client) ReadPump() error {
 			} else {
 				log.Printf("read info: %v", err)
 			}
-			c.Session.cancel()
+			// c.Session.cancel()
+			c.cancel()
 			return nil
 		}
 		switch msgType {
@@ -306,9 +312,12 @@ func (c *Client) WritePump() error {
 	}()
 	for {
 		select {
-		case <-c.ctx.Done():
-			log.Println("Client context done, exiting writePump.")
-			return c.ctx.Err()
+		// case <-c.ctx.Done():
+		// 	log.Println("Client context done, exiting writePump.")
+		// 	return c.ctx.Err()
+		// case <-c.Session.ctx.Done(): // 监听 session 的结束信号
+		// 	log.Println("Session is closed, exiting writePump.")
+		// 	return nil
 		case message, ok := <-c.Session.output:
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {
@@ -341,9 +350,7 @@ func (c *Client) WritePump() error {
 			// 	log.Println("write error:", err)
 			// 	return
 			// }
-		case <-c.Session.ctx.Done(): // 监听 session 的结束信号
-			log.Println("Session is closed, exiting writePump.")
-			return nil
+
 		// case <-c.session.Done:
 		// 	log.Println("Session processing done, exiting writePump.")
 		// 	return
