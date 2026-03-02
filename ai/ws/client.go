@@ -40,21 +40,38 @@ type Client struct {
 	userId int64
 
 	registerCh chan bool
+
+	sessionTimeOut time.Duration
 }
 
-func NewClient(hub *Hub, conn *websocket.Conn, callback Callback, userId int64) *Client {
-	ctx, cancel := context.WithCancel(context.Background())
+type ClientConfig struct {
+	Hub            *Hub
+	Conn           *websocket.Conn
+	Callback       Callback
+	UserId         int64
+	SessionTimeOut time.Duration
+}
+
+func NewClient(config *ClientConfig) *Client {
+
+	ctx, cancel := func() (context.Context, context.CancelFunc) {
+		if config.SessionTimeOut > 0 {
+			return context.WithTimeout(context.Background(), config.SessionTimeOut)
+		}
+		return context.WithCancel(context.Background())
+	}()
+
 	g, ctx := errgroup.WithContext(ctx)
-	session := NewSession(ctx, callback)
+	session := NewSession(ctx, config.Callback)
 
 	return &Client{
-		Hub:        hub,
-		Conn:       conn,
+		Hub:        config.Hub,
+		Conn:       config.Conn,
 		Session:    session,
 		ctx:        ctx,
 		cancel:     cancel,
 		g:          g,
-		userId:     userId,
+		userId:     config.UserId,
 		registerCh: make(chan bool, 1), // ⭐ 必须带缓冲
 	}
 }
@@ -79,7 +96,7 @@ func (c *Client) Start() {
 		// 	"message": "连接数已达上限",
 		// })
 		// too many connections, send error message and close connection
-		c.sendMessage(buildMessage("many_connections", "连接数已达上限"))
+		c.sendMessage(buildMessage("many_connections", "连接数已达上限, 请重试"))
 		// 优雅关闭
 		_ = c.Conn.WriteMessage(
 			websocket.CloseMessage,
@@ -112,6 +129,7 @@ func (c *Client) Start() {
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
 		c.Session.Close()
+		c.cancel()
 		// c.Close()
 		c.Conn.Close()
 		// c.Hub.unregister <- c
@@ -339,7 +357,8 @@ func (c *Client) WritePump() error {
 				log.Printf("Sending audio message of length %d", len(message.Data))
 
 				if err := c.Conn.WriteMessage(websocket.BinaryMessage, message.Data); err != nil {
-					c.Session.cancel()
+					// c.Session.cancel()
+					c.cancel()
 					log.Println("write error:", err)
 
 					return nil
@@ -357,7 +376,8 @@ func (c *Client) WritePump() error {
 		case <-ticker.C:
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				c.Session.cancel()
+				// c.Session.cancel()
+				c.cancel()
 				log.Println("ping error:", err)
 				return nil
 			}
@@ -368,7 +388,8 @@ func (c *Client) WritePump() error {
 func (c *Client) sendMessage(jsonBytes []byte) {
 
 	if err := c.Conn.WriteMessage(websocket.TextMessage, jsonBytes); err != nil {
-		c.Session.cancel()
+		// c.Session.cancel()
+		c.cancel()
 		log.Println("write error:", err)
 		return
 	}

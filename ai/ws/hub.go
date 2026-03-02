@@ -21,7 +21,7 @@ func NewHub() *Hub {
 		broadcastByte: make(chan []byte),
 		Register:      make(chan *Client),
 		unregister:    make(chan *Client),
-		maxPerUser:    1, // 每个用户最大连接数
+		maxPerUser:    3, // 每个用户最大连接数
 	}
 	return &hub
 }

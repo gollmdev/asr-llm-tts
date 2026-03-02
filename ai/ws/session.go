@@ -583,7 +583,7 @@ func (s *Session) AudioRecognitionConsumer() {
 		},
 		func(data string) {
 			if data == "" {
-				s.sendJson(SessionText, "event", "no_asr_result")
+				s.sendJson(SessionText, "no_asr_result", "未识别到内容, 请重试")
 				s.cancel()
 
 				return
@@ -763,7 +763,7 @@ func (s *Session) Close() {
 	} else {
 		log.Println("All streams completed successfully")
 	}
-	// s.cancel()
+	s.cancel()
 	// close(s.output)
 }
 
