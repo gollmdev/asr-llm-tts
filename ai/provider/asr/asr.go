@@ -9,7 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/gollmdev/asr-llm-tts/eventbus"
+	// "github.com/gollmdev/asr-llm-tts/ai/session"
+	"github.com/gollmdev/asr-llm-tts/ai/event"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -19,7 +20,7 @@ type AsrStream struct {
 	sampleRate  int
 	apiKey      string
 	unsubscribe func()
-	ch          <-chan eventbus.Event
+	ch          <-chan event.Event
 	// done        chan struct{}
 	callback RecognitionCallback
 }
@@ -44,7 +45,7 @@ func (c *Callback) OnEvent(result *RecognitionResult) {
 }
 
 func NewAsrStream(unsubscribe func(),
-	ch <-chan eventbus.Event,
+	ch <-chan event.Event,
 	model,
 	format string,
 	sampleRate int,
@@ -96,15 +97,15 @@ func (s *AsrStream) Call(g *errgroup.Group, ctx context.Context) error {
 		case <-timer.C:
 			// log.Println("AsrStream timeout")
 			return errors.New("asr stream timeout")
-		case event, ok := <-s.ch:
+		case message, ok := <-s.ch:
 			if !ok {
 				log.Println("AsrStream error!")
 				return nil
 			}
 			timer.Reset(silenceTimeout)
-			switch event.Type {
-			case eventbus.EventAudioChunk:
-				audioData, ok := event.Data.([]byte)
+			switch message.Type {
+			case event.EventAudioChunk:
+				audioData, ok := message.Data.([]byte)
 				if !ok {
 					continue
 				}
@@ -114,7 +115,7 @@ func (s *AsrStream) Call(g *errgroup.Group, ctx context.Context) error {
 				if err != nil {
 					return err
 				}
-			case eventbus.EventAudioDone:
+			case event.EventAudioDone:
 				err := recognition.StreamingComplete(30 * time.Second)
 
 				if err != nil {

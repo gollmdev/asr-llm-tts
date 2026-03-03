@@ -1,14 +1,13 @@
-package eventbus
+package session
 
 import (
 	"context"
 	"log"
 	"sync"
 
+	"github.com/gollmdev/asr-llm-tts/ai/event"
 	"golang.org/x/sync/errgroup"
 )
-
-type EventType string
 
 // const (
 // 	EventLLMChunk EventType = "llm.chunk"
@@ -20,7 +19,7 @@ type EventType string
 type RingBuffer struct {
 	mu     sync.RWMutex
 	size   int
-	buffer []Event
+	buffer []event.Event
 	index  int64
 }
 
@@ -33,7 +32,7 @@ type RingBuffer struct {
 
 type Subscriber struct {
 	// eventType EventType
-	Ch     chan Event
+	Ch     chan event.Event
 	Ctx    context.Context
 	cancel context.CancelFunc
 	G      *errgroup.Group
@@ -43,8 +42,8 @@ type Subscriber struct {
 type Bus struct {
 	mu        sync.RWMutex
 	ring      *RingBuffer
-	subs      map[EventType]map[*Subscriber]struct{} // 多播 / 广播 一个 EventType 可以有多个 Subscriber
-	SubSize   chan int                               // 用于标记没有订阅者的事件类型
+	subs      map[event.EventType]map[*Subscriber]struct{} // 多播 / 广播 一个 EventType 可以有多个 Subscriber
+	SubSize   chan int                                     // 用于标记没有订阅者的事件类型
 	closeOnce sync.Once
 
 	closed bool
@@ -64,30 +63,25 @@ type Bus struct {
 // 	closed bool
 // }
 
-type Event struct {
-	Type EventType
-	Data any
-}
-
 func NewRingBuffer(size int) *RingBuffer {
 	return &RingBuffer{
 		size:   size,
-		buffer: make([]Event, size),
+		buffer: make([]event.Event, size),
 	}
 }
 
 func NewBus(bufferSize int) *Bus {
 	return &Bus{
-		subs:    make(map[EventType]map[*Subscriber]struct{}),
+		subs:    make(map[event.EventType]map[*Subscriber]struct{}),
 		ring:    NewRingBuffer(bufferSize),
 		SubSize: make(chan int),
 	}
 }
-func (r *RingBuffer) Replay(fromID int64) []Event {
+func (r *RingBuffer) Replay(fromID int64) []event.Event {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var result []Event
+	var result []event.Event
 
 	for i := fromID; i < r.index; i++ {
 		if i < r.index-int64(r.size) {
@@ -99,7 +93,7 @@ func (r *RingBuffer) Replay(fromID int64) []Event {
 	return result
 }
 
-func (b *Bus) Subscribe(ctx context.Context, types ...EventType) (*Subscriber, func()) {
+func (b *Bus) Subscribe(ctx context.Context, types ...event.EventType) (*Subscriber, func()) {
 	// ch := make(chan Event, 16)
 	ctx, cancel := context.WithCancel(ctx)
 	g, ctx := errgroup.WithContext(ctx)
@@ -107,7 +101,7 @@ func (b *Bus) Subscribe(ctx context.Context, types ...EventType) (*Subscriber, f
 		// eventType: eventType,
 		Ctx:    ctx,
 		cancel: cancel,
-		Ch:     make(chan Event, 16),
+		Ch:     make(chan event.Event, 16),
 		G:      g,
 		// Closed:    make(chan struct{}),
 	}
@@ -196,7 +190,7 @@ func (b *Bus) Subscribe(ctx context.Context, types ...EventType) (*Subscriber, f
 	return sub, unsub
 }
 
-func (b *Bus) Unsubscribe(t EventType, sub *Subscriber) {
+func (b *Bus) Unsubscribe(t event.EventType, sub *Subscriber) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -213,7 +207,7 @@ func (b *Bus) Unsubscribe(t EventType, sub *Subscriber) {
 	}
 }
 
-func (r *RingBuffer) Add(event Event) {
+func (r *RingBuffer) Add(event event.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -229,8 +223,8 @@ func (r *RingBuffer) Add(event Event) {
 	// return event
 }
 
-func (b *Bus) Publish(e Event) {
-	if e.Type == EventLLMChunk {
+func (b *Bus) Publish(e event.Event) {
+	if e.Type == event.EventLLMChunk {
 		b.ring.Add(e)
 	}
 

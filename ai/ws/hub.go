@@ -3,6 +3,8 @@ package ws
 import (
 	"context"
 	"log"
+
+	"github.com/gollmdev/asr-llm-tts/ai/session"
 )
 
 type Hub struct {
@@ -63,7 +65,7 @@ func (h *Hub) Run(ctx context.Context) {
 				for c := range h.userClients[uid] {
 
 					// c.sendMessage(buildMessage("many_connections", "连接数已达上限, 系统关闭旧连接!"))
-					c.Session.sendJson(SessionText, "many_connections", "连接数已达上限, 系统关闭旧连接!")
+					c.Session.SendSafe(session.SessionText, session.BuildMessage("many_connections", "连接数已达上限, 系统关闭旧连接!"))
 					c.cancel()
 					// h.delete(c)
 					break

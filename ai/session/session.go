@@ -1,4 +1,4 @@
-package ws
+package session
 
 import (
 	"context"
@@ -13,11 +13,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gollmdev/asr-llm-tts/ai/event"
 	"github.com/gollmdev/asr-llm-tts/ai/model"
 	"github.com/gollmdev/asr-llm-tts/ai/provider/asr"
 	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
 	"github.com/gollmdev/asr-llm-tts/ai/provider/tts"
-	"github.com/gollmdev/asr-llm-tts/eventbus"
+
 	"golang.org/x/sync/errgroup"
 )
 
@@ -46,7 +47,9 @@ type Consumer struct {
 	close       func()
 	g           *errgroup.Group
 }
-
+type SessionConfig struct {
+	TTSEnabled bool
+}
 type Session struct {
 	// gCtx    context.Context
 	// gCancel context.CancelFunc
@@ -60,11 +63,11 @@ type Session struct {
 	// ttsInput chan string
 	// textOut  chan string
 	// audioOut chan []byte
-	bus          *eventbus.Bus
+	bus          *Bus
 	output       chan SessionMessage
 	FullResponse strings.Builder
 	// Done         chan struct{}
-	ttsEnabled bool
+	SessionConfig *SessionConfig
 	// consumers  map[string]func() // key -> cancel func
 	consumers map[SessionName]*Consumer
 	callback  Callback
@@ -76,25 +79,29 @@ type Session struct {
 type EventContext struct {
 	Ctx          context.Context
 	Send         func(msgType SessionMessageType, data map[string]any)
-	PublishEvent func(event eventbus.Event)
+	PublishEvent func(event event.Event)
 }
 type Callback interface {
 
-	// OnEvent(eventType eventbus.EventType, text string, publishMesaage func(message []map[string]any))
-	// OnEvent(eventType eventbus.EventType, text map[string]any, publishMesaage func(message []map[string]any))
+	// OnEvent(eventType EventType, text string, publishMesaage func(message []map[string]any))
+	// OnEvent(eventType EventType, text map[string]any, publishMesaage func(message []map[string]any))
 	OnCitationsEvent(citations map[string]model.Citations)
 	OnThoughtChainEvent(thoughtChain model.ThoughtChain)
-	OnEvent(ctx *EventContext, eventType eventbus.EventType, text string)
-	// OnEventResult(ctx *EventContext, eventType eventbus.EventType, text string)
+	OnEvent(ctx *EventContext, eventType event.EventType, text string)
+	// OnEventResult(ctx *EventContext, eventType EventType, text string)
 	OnFinish()
 	GetMessage(text string) []map[string]any
 }
 
-func NewSession(ctx context.Context, callback Callback) *Session {
+func NewSession(ctx context.Context, callback Callback, config *SessionConfig) *Session {
 	// ctx, cancel := context.WithCancel(context.Background())
 	baseCtx, cancel := context.WithCancel(ctx)
 	// gCtx, gCancel := context.WithCancel(context.Background())
 	g, ctx := errgroup.WithContext(baseCtx) //  关键：绑定 context
+
+	if config == nil {
+		config = &SessionConfig{}
+	}
 
 	s := &Session{
 		ctx:    ctx,
@@ -105,11 +112,12 @@ func NewSession(ctx context.Context, callback Callback) *Session {
 		// textOut:  make(chan string, 32),
 		// ttsInput: make(chan string, 32),
 		// audioOut: make(chan []byte, 32),
-		bus:    eventbus.NewBus(1024),
+		bus:    NewBus(1024),
 		output: make(chan SessionMessage, 32),
 		// Done:       make(chan struct{}),
-		ttsEnabled: false,
-		consumers:  make(map[SessionName]*Consumer),
+		// ttsEnabled: false,
+		SessionConfig: config,
+		consumers:     make(map[SessionName]*Consumer),
 		// textIn:  make(chan string, 32),
 		// audioIn: make(chan []byte, 32),
 		// done:    make(chan struct{}), // 标记 runPipeline 是否退出
@@ -123,6 +131,10 @@ func NewSession(ctx context.Context, callback Callback) *Session {
 	// 启动处理协程
 	// go s.runPipeline()
 	return s
+}
+
+func (s *Session) Output() <-chan SessionMessage {
+	return s.output
 }
 
 // func (s *Session) addConsumer(name string, unsubscribe func()) {
@@ -148,7 +160,7 @@ func NewSession(ctx context.Context, callback Callback) *Session {
 // 	}
 // }
 
-func (s *Session) Subscribe(name SessionName, types ...eventbus.EventType) (*eventbus.Subscriber, func()) {
+func (s *Session) Subscribe(name SessionName, types ...event.EventType) (*Subscriber, func()) {
 	consumer, ok := s.consumers[name]
 	if ok && consumer != nil {
 		// consumer.unsubscribe()
@@ -157,7 +169,7 @@ func (s *Session) Subscribe(name SessionName, types ...eventbus.EventType) (*eve
 			log.Printf("Consumer %s ended with error: %v\n", name, err)
 		}
 	}
-	sub, unsubscribe_ := s.bus.Subscribe(s.ctx, eventbus.EventLLMChunk, eventbus.EventLLMDone)
+	sub, unsubscribe_ := s.bus.Subscribe(s.ctx, event.EventLLMChunk, event.EventLLMDone)
 	s.mu.Lock()
 	s.consumers[name] = &Consumer{
 		unsubscribe: unsubscribe_,
@@ -200,6 +212,7 @@ func (s *Session) MonitorSubSize() {
 
 		close(s.output)
 
+		// s.cancel()
 		if len(s.consumers) != 0 {
 			for name := range s.consumers {
 				delete(s.consumers, name)
@@ -319,29 +332,30 @@ func (s *Session) PublishBinaryStream(bytes []byte) {
 	case 0x02:
 		bytes = bytes[1:]
 		// log.Printf("Received binary message of length %d", len(bytes))
-		s.bus.Publish(eventbus.Event{Type: eventbus.EventAudioChunk, Data: bytes})
+		s.bus.Publish(event.Event{Type: event.EventAudioChunk, Data: bytes})
 	case 0x03:
-		s.bus.Publish(eventbus.Event{Type: eventbus.EventAudioDone, Data: nil})
+		s.bus.Publish(event.Event{Type: event.EventAudioDone, Data: nil})
 	case 0x04:
 		s.cancel() // end session on audio done
 	default:
 		log.Printf("Unknown audio message type: %x", msg_type)
 	}
 }
-func (s *Session) PublishTextStream(text string) {
-	s.bus.Publish(eventbus.Event{Type: eventbus.EventTextChunk, Data: text})
-	if s.ttsEnabled {
-		s.TTsConsumer()
-		log.Println("tts open!")
-	}
-}
 
-func (s *Session) PublishEvent(event eventbus.Event) {
+// func (s *Session) PublishTextStream(text string) {
+// 	s.bus.Publish(Event{Type: EventTextChunk, Data: text})
+// 	if s.ttsEnabled {
+// 		s.TTsConsumer()
+// 		log.Println("tts open!")
+// 	}
+// }
+
+func (s *Session) PublishEvent(event event.Event) {
 	s.bus.Publish(event)
 }
 
 func (s *Session) LLMTaskConsumer() func() {
-	sub, unsubscribe := s.bus.Subscribe(s.ctx, eventbus.EventUserMessage, eventbus.EventTitleGenerated)
+	sub, unsubscribe := s.bus.Subscribe(s.ctx, event.EventUserMessage, event.EventTitleGenerated)
 	s.g.Go(func() error {
 		defer func() {
 			unsubscribe()
@@ -361,7 +375,7 @@ func (s *Session) LLMTaskConsumer() func() {
 				// 	// log.Println("LLMStream received chunk:", chunk)
 				// 	// s.sendJson(SessionText, "message", chunk)
 				// 	// s.FullResponse.WriteString(chunk)
-				// 	// s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
+				// 	// s.bus.Publish(Event{Type: EventLLMChunk, Data: chunk})
 				// 	if s.callback != nil {
 				// 		s.callback.OnEventResult(s.ctx, message.Type, chunk, func(msgType SessionMessageType, data map[string]any) {
 				// 			s.sendJsonMap(msgType, data)
@@ -395,8 +409,9 @@ func (s *Session) LLMTaskConsumer() func() {
 }
 
 func (s *Session) LLMConsumer() {
-	sub, unsubscribe := s.bus.Subscribe(s.ctx, eventbus.EventTextChunk)
+	sub, unsubscribe := s.bus.Subscribe(s.ctx, event.EventTextChunk)
 	close := s.LLMTaskConsumer()
+
 	s.g.Go(func() error {
 		defer func() {
 			unsubscribe()
@@ -412,17 +427,17 @@ func (s *Session) LLMConsumer() {
 					return nil
 				}
 				if s.callback != nil {
-					// s.callback.OnEvent(eventbus.EventUserMessage, message.Data.(string), func(subMessage []map[string]any) {
-					// 	s.bus.Publish(eventbus.Event{Type: eventbus.EventUserMessage, Data: subMessage})
+					// s.callback.OnEvent(EventUserMessage, message.Data.(string), func(subMessage []map[string]any) {
+					// 	s.bus.Publish(Event{Type: EventUserMessage, Data: subMessage})
 					// })
-					s.callback.OnEvent(s.eventCtx, eventbus.EventUserMessage, message.Data.(string))
+					s.callback.OnEvent(s.eventCtx, event.EventUserMessage, message.Data.(string))
 				}
 				input := s.callback.GetMessage(message.Data.(string))
 				// s.LLMStream(input, true, func(chunk string) {
 				// 	// log.Println("LLMStream received chunk:", chunk)
 				// 	s.sendJson(SessionText, "message", chunk)
 				// 	s.FullResponse.WriteString(chunk)
-				// 	s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
+				// 	s.bus.Publish(Event{Type: EventLLMChunk, Data: chunk})
 				// })
 				tools := []map[string]any{
 					{
@@ -468,24 +483,24 @@ func (s *Session) LLMConsumer() {
 								chunk := *msg.Content
 								s.sendJson(SessionText, "message", chunk)
 								s.FullResponse.WriteString(chunk)
-								s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
+								s.bus.Publish(event.Event{Type: event.EventLLMChunk, Data: chunk})
 							}
 						}
 					}
 
 				}
 
-				s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMDone, Data: nil})
+				s.bus.Publish(event.Event{Type: event.EventLLMDone, Data: nil})
 				// 获取完整响应（此时才转为 string）
 				finalResponse := s.FullResponse.String()
 				if s.callback != nil && finalResponse != "" {
-					// s.callback.OnEventResult(s.ctx, eventbus.EventLLMResponseComplete, finalResponse, func(msgType SessionMessageType, data map[string]any) {
+					// s.callback.OnEventResult(s.ctx, EventLLMResponseComplete, finalResponse, func(msgType SessionMessageType, data map[string]any) {
 					// 	s.sendJsonMap(msgType, data)
 					// })
-					// s.callback.OnEvent(eventbus.EventLLMResponseComplete, finalResponse, func(subMessage []map[string]any) {
-					// 	s.bus.Publish(eventbus.Event{Type: eventbus.EventUserMessage, Data: subMessage})
+					// s.callback.OnEvent(EventLLMResponseComplete, finalResponse, func(subMessage []map[string]any) {
+					// 	s.bus.Publish(Event{Type: EventUserMessage, Data: subMessage})
 					// })
-					s.callback.OnEvent(s.eventCtx, eventbus.EventLLMResponseComplete, finalResponse)
+					s.callback.OnEvent(s.eventCtx, event.EventLLMResponseComplete, finalResponse)
 					// mock data for citations and thought chain events
 					s.callback.OnCitationsEvent(map[string]model.Citations{
 						"12345679": {
@@ -514,10 +529,10 @@ func (s *Session) LLMConsumer() {
 				}
 				log.Println("Final LLM Response:", finalResponse)
 
-				if !s.ttsEnabled {
-					// close(s.Done)
-					log.Println(">> llm close session, tts is not open! ")
-				}
+				// if !s.ttsEnabled {
+				// 	// close(s.Done)
+				// 	log.Println(">> llm close session, tts is not open! ")
+				// }
 				// close(s.Done)
 
 				close() // close llm task consumer
@@ -554,7 +569,7 @@ func (s *Session) LLMConsumer() {
 // 		log.Println("LLMStream received chunk:", chunk)
 // 		s.sendSafe(SessionText, []byte(chunk))
 // 		s.FullResponse.WriteString(chunk)
-// 		s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMChunk, Data: chunk})
+// 		s.bus.Publish(Event{Type: EventLLMChunk, Data: chunk})
 // 		// select {
 // 		// case <-s.ctx.Done():
 // 		// 	return
@@ -578,7 +593,7 @@ func (s *Session) LLMConsumer() {
 // 	// 	log.Printf("Session %s cancelled, skipping DB save", s.ID)
 // 	// 	return
 // 	// }
-// 	s.bus.Publish(eventbus.Event{Type: eventbus.EventLLMDone, Data: nil})
+// 	s.bus.Publish(Event{Type: EventLLMDone, Data: nil})
 // 	// 获取完整响应（此时才转为 string）
 // 	finalResponse := s.FullResponse.String()
 // 	log.Println("Final LLM Response:", finalResponse)
@@ -694,7 +709,7 @@ func (s *Session) LLMConsumer() {
 //		log.Println("LLMStream completed")
 //	}
 func (s *Session) AudioRecognitionConsumer() {
-	sub, unsubscribe := s.bus.Subscribe(s.ctx, eventbus.EventAudioChunk, eventbus.EventAudioDone)
+	sub, unsubscribe := s.bus.Subscribe(s.ctx, event.EventAudioChunk, event.EventAudioDone)
 	asrStream := asr.NewAsrStream(
 		unsubscribe,
 		sub.Ch,
@@ -716,7 +731,12 @@ func (s *Session) AudioRecognitionConsumer() {
 			// s.TTsConsumer()
 
 			s.sendJson(SessionText, "asr_result", data)
-			s.PublishTextStream(data)
+			// s.PublishTextStream(data)
+			s.PublishEvent(event.Event{
+				Type: event.EventTextChunk,
+				Data: data,
+			})
+
 			log.Println("AudioRecognitionConsumer complete data:", data)
 		},
 	)
@@ -736,7 +756,7 @@ func (s *Session) AudioRecognitionConsumer() {
 
 func (s *Session) TTsConsumer() {
 
-	sub, unsubscribe := s.Subscribe(TTS, eventbus.EventLLMChunk, eventbus.EventLLMDone)
+	sub, unsubscribe := s.Subscribe(TTS, event.EventLLMChunk, event.EventLLMDone)
 	// longanyang longwan_v3 longanhuan
 	// g, ctx := errgroup.WithContext(ctx)
 	// s.addConsumer("tts", unsubscribe)
@@ -748,7 +768,7 @@ func (s *Session) TTsConsumer() {
 		tts.PCM_22050HZ_MONO_16BIT,
 		// s.Done,
 		func(data []byte) {
-			s.sendSafe(SessionAudio, data)
+			s.SendSafe(SessionAudio, data)
 		},
 	)
 	sub.G.Go(func() error {
@@ -823,8 +843,8 @@ func (s *Session) TTsConsumer() {
 // }
 
 func (s *Session) sendJson(msgType SessionMessageType, event string, data string) {
-	msg := buildMessage(event, data)
-	s.sendSafe(msgType, msg)
+	msg := BuildMessage(event, data)
+	s.SendSafe(msgType, msg)
 }
 
 func (s *Session) sendJsonMap(msgType SessionMessageType, data map[string]any) {
@@ -833,9 +853,9 @@ func (s *Session) sendJsonMap(msgType SessionMessageType, data map[string]any) {
 	if err != nil {
 		log.Println("json marshal error:", err)
 	}
-	s.sendSafe(msgType, jsonBytes)
+	s.SendSafe(msgType, jsonBytes)
 }
-func (s *Session) sendSafe(msgType SessionMessageType, data []byte) {
+func (s *Session) SendSafe(msgType SessionMessageType, data []byte) {
 	select {
 	case s.output <- SessionMessage{Type: msgType, Data: data}:
 	case <-s.ctx.Done():

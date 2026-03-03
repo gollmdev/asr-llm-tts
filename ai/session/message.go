@@ -1,11 +1,11 @@
-package ws
+package session
 
 import (
 	"encoding/json"
 	"log"
 )
 
-func buildMessage(event string, text string) []byte {
+func BuildMessage(event string, text string) []byte {
 
 	jsonBytes, err := json.Marshal(map[string]any{
 		"event": event,

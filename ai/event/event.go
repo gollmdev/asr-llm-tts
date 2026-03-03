@@ -1,4 +1,6 @@
-package eventbus
+package event
+
+type EventType string
 
 const (
 	EventLLMChunk            EventType = "llm.chunk"
@@ -14,3 +16,8 @@ const (
 	EventLLMCitation         EventType = "llm.citation"
 	EventLLMThoughtChain     EventType = "llm.thought_chain"
 )
+
+type Event struct {
+	Type EventType
+	Data any
+}

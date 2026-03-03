@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/gollmdev/asr-llm-tts/eventbus"
+	"github.com/gollmdev/asr-llm-tts/ai/event"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -33,13 +33,13 @@ type TtsStream struct {
 	voice       string
 	fmt         AudioFormat
 	unsubscribe func()
-	ch          <-chan eventbus.Event
+	ch          <-chan event.Event
 	// done        chan struct{}
 	callback ResultCallback
 }
 
 func NewTtsStream(unsubscribe func(),
-	ch <-chan eventbus.Event,
+	ch <-chan event.Event,
 	model, voice string, fmt AudioFormat,
 	// done chan struct{},
 	onDataFunc func(data []byte)) *TtsStream {
@@ -94,7 +94,7 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 			}
 			// log.Println("Start TTSStream for event:", message.Data.(string))
 			switch message.Type {
-			case eventbus.EventLLMChunk:
+			case event.EventLLMChunk:
 				text := message.Data.(string)
 				log.Println("Speech Synthesizer received chunk:", text)
 				if err := syn.StreamingCall(ctx, text); err != nil {
@@ -104,7 +104,7 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 				// TTSStream(text, s.ctx, func(chunk []byte) {
 				// 	s.sendSafe(SessionAudio, chunk)
 				// })
-			case eventbus.EventLLMDone:
+			case event.EventLLMDone:
 				if err := syn.StreamingComplete(ctx, 30*time.Second); err != nil {
 					log.Println(err)
 				}

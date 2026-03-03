@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gollmdev/asr-llm-tts/ai/session"
 	"github.com/gollmdev/asr-llm-tts/ai/ws"
 	"github.com/gorilla/websocket"
 )
@@ -28,7 +29,7 @@ func ServeWs(hub *ws.Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session := ws.NewSession(context.Background(), nil)
+	session := session.NewSession(context.Background(), nil, nil)
 
 	client := &ws.Client{Hub: hub, Conn: conn, Session: session}
 	client.Hub.Register <- client

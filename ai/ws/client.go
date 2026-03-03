@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gollmdev/asr-llm-tts/ai/event"
+	"github.com/gollmdev/asr-llm-tts/ai/session"
 	"github.com/gorilla/websocket"
 	"golang.org/x/sync/errgroup"
 )
@@ -29,7 +31,7 @@ type Client struct {
 	Hub  *Hub
 	Conn *websocket.Conn
 	// send    chan WsMessage
-	Session *Session
+	Session *session.Session
 
 	g      *errgroup.Group
 	ctx    context.Context
@@ -45,24 +47,16 @@ type Client struct {
 }
 
 type ClientConfig struct {
-	Hub            *Hub
-	Conn           *websocket.Conn
-	Callback       Callback
-	UserId         int64
-	SessionTimeOut time.Duration
+	Hub  *Hub
+	Conn *websocket.Conn
+	// Callback session.Callback
+	UserId int64
+	// SessionTimeOut time.Duration
 }
 
-func NewClient(config *ClientConfig) *Client {
-
-	ctx, cancel := func() (context.Context, context.CancelFunc) {
-		if config.SessionTimeOut > 0 {
-			return context.WithTimeout(context.Background(), config.SessionTimeOut)
-		}
-		return context.WithCancel(context.Background())
-	}()
+func NewClient(ctx context.Context, cancel context.CancelFunc, session *session.Session, config *ClientConfig) *Client {
 
 	g, ctx := errgroup.WithContext(ctx)
-	session := NewSession(ctx, config.Callback)
 
 	return &Client{
 		Hub:        config.Hub,
@@ -96,7 +90,7 @@ func (c *Client) Start() {
 		// 	"message": "连接数已达上限",
 		// })
 		// too many connections, send error message and close connection
-		c.sendMessage(buildMessage("many_connections", "连接数已达上限, 请重试"))
+		c.sendMessage(session.BuildMessage("many_connections", "连接数已达上限, 请重试"))
 		// 优雅关闭
 		_ = c.Conn.WriteMessage(
 			websocket.CloseMessage,
@@ -220,7 +214,11 @@ func (c *Client) ReadPump() error {
 			var obj map[string]any
 			if err := json.Unmarshal(message, &obj); err != nil {
 				log.Printf("invalid message format: %v", err)
-				c.Session.PublishTextStream(string(message))
+				// c.Session.PublishTextStream(string(message))
+				c.Session.PublishEvent(event.Event{
+					Type: event.EventTextChunk,
+					Data: string(message),
+				})
 			} else {
 				if objType, ok := obj["type"].(string); ok {
 					switch objType {
@@ -228,30 +226,36 @@ func (c *Client) ReadPump() error {
 						if config, ok := obj["config"].(map[string]any); ok {
 							if tts, ok := config["tts"].(bool); ok {
 								if tts {
-									c.Session.ttsEnabled = true
+									c.Session.SessionConfig.TTSEnabled = true
+									c.Session.TTsConsumer()
+									log.Println("tts open!")
 								}
 							}
 						}
 					case "message":
 
 						if text, ok := obj["content"].(string); ok {
-							c.Session.PublishTextStream(text)
+							// c.Session.PublishTextStream(text)
+							c.Session.PublishEvent(event.Event{
+								Type: event.EventTextChunk,
+								Data: string(text),
+							})
 						}
 
 					case "control":
 						if config, ok := obj["config"].(map[string]any); ok {
 							if tts, ok := config["tts"].(bool); ok {
-								if tts != c.Session.ttsEnabled {
+								if tts != c.Session.SessionConfig.TTSEnabled {
 
 									if tts {
-										c.Session.ttsEnabled = true
+										c.Session.SessionConfig.TTSEnabled = true
 										// c.Session.waitConsumers("tts")
 										c.Session.TTsConsumer()
 										log.Println("tts open!")
 									} else {
-										c.Session.ttsEnabled = false
+										c.Session.SessionConfig.TTSEnabled = false
 										// c.Session.CancelConsumer("tts")
-										c.Session.UnSubscribe(TTS)
+										c.Session.UnSubscribe(session.TTS)
 										log.Println("tts close!")
 									}
 								}
@@ -336,7 +340,7 @@ func (c *Client) WritePump() error {
 		// case <-c.Session.ctx.Done(): // 监听 session 的结束信号
 		// 	log.Println("Session is closed, exiting writePump.")
 		// 	return nil
-		case message, ok := <-c.Session.output:
+		case message, ok := <-c.Session.Output():
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {
 				// Hub 关闭 channel
@@ -345,10 +349,10 @@ func (c *Client) WritePump() error {
 				return nil
 			}
 			switch message.Type {
-			case SessionText:
+			case session.SessionText:
 				log.Printf("Sending text message: %s", string(message.Data))
 				c.sendMessage(message.Data)
-			case SessionAudio:
+			case session.SessionAudio:
 				// log.Printf("Sending text message: %s", string(message.Data))
 				// if err := c.conn.WriteMessage(websocket.TextMessage, message.Data); err != nil {
 				// 	log.Println("write error:", err)
