@@ -68,17 +68,24 @@ type Session struct {
 	// consumers  map[string]func() // key -> cancel func
 	consumers map[SessionName]*Consumer
 	callback  Callback
+	eventCtx  *EventContext
 
 	// // 新增：用于等待 runPipeline 退出
 	// Done chan struct{}
 }
-
+type EventContext struct {
+	Ctx          context.Context
+	Send         func(msgType SessionMessageType, data map[string]any)
+	PublishEvent func(event eventbus.Event)
+}
 type Callback interface {
-	OnEvent(eventType eventbus.EventType, text string, publishMesaage func(message []map[string]any))
+
+	// OnEvent(eventType eventbus.EventType, text string, publishMesaage func(message []map[string]any))
 	// OnEvent(eventType eventbus.EventType, text map[string]any, publishMesaage func(message []map[string]any))
 	OnCitationsEvent(citations map[string]model.Citations)
 	OnThoughtChainEvent(thoughtChain model.ThoughtChain)
-	OnEventResult(ctx context.Context, eventType eventbus.EventType, text string, send func(msgType SessionMessageType, data map[string]any))
+	OnEvent(ctx *EventContext, eventType eventbus.EventType, text string)
+	// OnEventResult(ctx *EventContext, eventType eventbus.EventType, text string)
 	OnFinish()
 	GetMessage(text string) []map[string]any
 }
@@ -108,7 +115,11 @@ func NewSession(ctx context.Context, callback Callback) *Session {
 		// done:    make(chan struct{}), // 标记 runPipeline 是否退出
 		callback: callback,
 	}
-
+	s.eventCtx = &EventContext{
+		Ctx:          ctx,
+		Send:         s.sendJsonMap,
+		PublishEvent: s.PublishEvent,
+	}
 	// 启动处理协程
 	// go s.runPipeline()
 	return s
@@ -325,8 +336,12 @@ func (s *Session) PublishTextStream(text string) {
 	}
 }
 
+func (s *Session) PublishEvent(event eventbus.Event) {
+	s.bus.Publish(event)
+}
+
 func (s *Session) LLMTaskConsumer() func() {
-	sub, unsubscribe := s.bus.Subscribe(s.ctx, eventbus.EventUserMessage)
+	sub, unsubscribe := s.bus.Subscribe(s.ctx, eventbus.EventUserMessage, eventbus.EventTitleGenerated)
 	s.g.Go(func() error {
 		defer func() {
 			unsubscribe()
@@ -365,9 +380,7 @@ func (s *Session) LLMTaskConsumer() func() {
 					log.Println("LLMStream error:", err)
 				} else {
 					if msg != nil && msg.Content != nil && s.callback != nil {
-						s.callback.OnEventResult(s.ctx, message.Type, *msg.Content, func(msgType SessionMessageType, data map[string]any) {
-							s.sendJsonMap(msgType, data)
-						})
+						s.callback.OnEvent(s.eventCtx, message.Type, *msg.Content)
 					}
 				}
 
@@ -399,9 +412,10 @@ func (s *Session) LLMConsumer() {
 					return nil
 				}
 				if s.callback != nil {
-					s.callback.OnEvent(eventbus.EventUserMessage, message.Data.(string), func(subMessage []map[string]any) {
-						s.bus.Publish(eventbus.Event{Type: eventbus.EventUserMessage, Data: subMessage})
-					})
+					// s.callback.OnEvent(eventbus.EventUserMessage, message.Data.(string), func(subMessage []map[string]any) {
+					// 	s.bus.Publish(eventbus.Event{Type: eventbus.EventUserMessage, Data: subMessage})
+					// })
+					s.callback.OnEvent(s.eventCtx, eventbus.EventUserMessage, message.Data.(string))
 				}
 				input := s.callback.GetMessage(message.Data.(string))
 				// s.LLMStream(input, true, func(chunk string) {
@@ -468,9 +482,10 @@ func (s *Session) LLMConsumer() {
 					// s.callback.OnEventResult(s.ctx, eventbus.EventLLMResponseComplete, finalResponse, func(msgType SessionMessageType, data map[string]any) {
 					// 	s.sendJsonMap(msgType, data)
 					// })
-					s.callback.OnEvent(eventbus.EventLLMResponseComplete, finalResponse, func(subMessage []map[string]any) {
-						s.bus.Publish(eventbus.Event{Type: eventbus.EventUserMessage, Data: subMessage})
-					})
+					// s.callback.OnEvent(eventbus.EventLLMResponseComplete, finalResponse, func(subMessage []map[string]any) {
+					// 	s.bus.Publish(eventbus.Event{Type: eventbus.EventUserMessage, Data: subMessage})
+					// })
+					s.callback.OnEvent(s.eventCtx, eventbus.EventLLMResponseComplete, finalResponse)
 					// mock data for citations and thought chain events
 					s.callback.OnCitationsEvent(map[string]model.Citations{
 						"12345679": {
