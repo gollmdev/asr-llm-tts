@@ -2,12 +2,13 @@ package dag
 
 import (
 	"context"
+	"fmt"
 	"log"
 )
 
 type AnswerNode struct{}
 
-func (n *AnswerNode) ID() string { return "answer" }
+func (n *AnswerNode) ID() string { return "llm" }
 func (n *AnswerNode) Mode() NodeMode {
 	return ModeAlwaysOn
 }
@@ -116,23 +117,23 @@ func (n *TTSNode) OutputTypes() []string {
 	return []string{"tts_audio"}
 }
 
-type OutputNode struct {
+type OutputNodeTest struct {
 	// id     string
 	Output chan Event
 }
 
-func NewOutputNode(id string) *OutputNode {
-	return &OutputNode{
+func NewOutputNodeTest(id string) *OutputNodeTest {
+	return &OutputNodeTest{
 		// id:     id,
 		Output: make(chan Event, 32),
 	}
 }
-func (n *OutputNode) Mode() NodeMode {
+func (n *OutputNodeTest) Mode() NodeMode {
 	return ModeLazy
 }
-func (n *OutputNode) ID() string { return "output" }
+func (n *OutputNodeTest) ID() string { return "output" }
 
-func (n *OutputNode) Run(
+func (n *OutputNodeTest) Run(
 	ctx context.Context,
 	in <-chan Event,
 	out chan<- Event,
@@ -168,9 +169,44 @@ func (n *OutputNode) Run(
 	}
 }
 
-func (n *OutputNode) InputTypes() []string {
+func (n *OutputNodeTest) InputTypes() []string {
 	return []string{"tts_audio"}
 }
-func (n *OutputNode) OutputTypes() []string {
+func (n *OutputNodeTest) OutputTypes() []string {
 	return []string{"test"}
+}
+
+func Test() {
+	outputNode := NewOutputNodeTest("final")
+
+	dag := &DAG{
+		Nodes: map[string]Node{
+			"answer": &AnswerNode{},
+			"tts":    &TTSNode{},
+			"output": outputNode,
+		},
+		Edges: []Edge{
+			{FromNode: "keyword", OnEvent: "keyword_done", ToNode: "db"},
+			// {FromNode: "db", OnEvent: "db_result", ToNode: "answer"},
+			{FromNode: "answer", OnEvent: "llm_chunk", ToNode: "tts"},
+			{FromNode: "tts", OnEvent: "tts_audio", ToNode: "output"},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	engine := NewEngine(ctx, cancel, dag)
+	go func() {
+		// time.Sleep(200 * time.Millisecond)
+		engine.nodeInput["answer"] <- Event{
+			Type: "user_input",
+			From: "external",
+			Data: "Tell me about Golang",
+		}
+	}()
+	go func() {
+		for ev := range outputNode.Output {
+			fmt.Println("FINAL OUTPUT:", ev.Data)
+		}
+	}()
+	engine.Start()
+	engine.Close()
 }

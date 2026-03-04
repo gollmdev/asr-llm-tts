@@ -2,7 +2,6 @@ package dag
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"sync"
 
@@ -272,7 +271,7 @@ func (e *Engine) dispatch(ev Event) {
 
 		e.nodeInput[target] <- ev
 
-		log.Printf("from  %s to %s receive %s", edge.FromNode, target, ev.Data)
+		log.Printf(">>>>>>>> from  %s to %s receive %s", edge.FromNode, target, ev.Data)
 	}
 
 }
@@ -307,39 +306,4 @@ func (e *Engine) handleUpstreamDone(from string) {
 		state.mu.Unlock()
 	}
 
-}
-
-func Test() {
-	outputNode := NewOutputNode("final")
-
-	dag := &DAG{
-		Nodes: map[string]Node{
-			"answer": &AnswerNode{},
-			"tts":    &TTSNode{},
-			"output": outputNode,
-		},
-		Edges: []Edge{
-			{FromNode: "keyword", OnEvent: "keyword_done", ToNode: "db"},
-			// {FromNode: "db", OnEvent: "db_result", ToNode: "answer"},
-			{FromNode: "answer", OnEvent: "llm_chunk", ToNode: "tts"},
-			{FromNode: "tts", OnEvent: "tts_audio", ToNode: "output"},
-		},
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	engine := NewEngine(ctx, cancel, dag)
-	go func() {
-		// time.Sleep(200 * time.Millisecond)
-		engine.nodeInput["answer"] <- Event{
-			Type: "user_input",
-			From: "external",
-			Data: "Tell me about Golang",
-		}
-	}()
-	go func() {
-		for ev := range outputNode.Output {
-			fmt.Println("FINAL OUTPUT:", ev.Data)
-		}
-	}()
-	engine.Start()
-	engine.Close()
 }
