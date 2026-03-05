@@ -1,8 +1,6 @@
 package node
 
 import (
-	"context"
-
 	dag "github.com/gollmdev/asr-llm-tts/ai/dag/core"
 )
 
@@ -14,23 +12,25 @@ func (n *TTSNode) Mode() dag.NodeMode {
 }
 
 func (n *TTSNode) Run(
-	ctx context.Context,
-	in <-chan dag.Event,
-	out chan<- dag.Event,
+	// ctx context.Context,
+	rt dag.NodeRuntime,
+	// in <-chan dag.Event,
+	// out chan<- dag.Event,
 ) error {
+	ctx := rt.Context()
 
 	for {
 		select {
-		case ev, ok := <-in:
+		case ev, ok := <-rt.Input():
 			if !ok {
 				return nil
 			}
 			text := ev.Data.(string)
-			out <- dag.Event{
+			rt.Emit(&dag.Event{
 				Type: "tts_audio",
 				From: n.ID(),
 				Data: "audio: [" + text + "]",
-			}
+			})
 			// audio := callTTS(text)
 			// audio := []string{
 			// 	text + "+ tts part 1",

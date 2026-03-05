@@ -37,3 +37,61 @@
 // 		}
 // 	}
 // }
+
+
+```
+Node
+  ↓
+Emit
+  ↓
+middleware chain
+  ↓
+dispatch
+  ↓
+bus
+  ↓
+nodeInput
+  ↓
+Node
+```
+
+你的 Engine 其实已经接近：
+
+Actor Runtime
+
+未来可以演化成：
+
+LLM Workflow Runtime
+
+支持：
+
+DAG
+
+streaming
+
+memory
+
+tool
+
+checkpoint
+
+这一套是 LangGraph / Temporal 类系统的核心。
+
+
+
+在 workflow / DAG runtime 里通常有三层：
+```
+Process Context   (程序级)
+        ↓
+Session Context   (会话级)
+        ↓
+Engine Context    (一次执行)
+        ↓
+Node Context      (节点运行)
+```
+```
+ctx
+ └─ RuntimeContext
+      └─ Engine
+           └─ nodeRuntime
+```

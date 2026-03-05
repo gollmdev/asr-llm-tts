@@ -13,14 +13,16 @@ func (n *AnswerNode) Mode() NodeMode {
 	return ModeAlwaysOn
 }
 func (n *AnswerNode) Run(
-	ctx context.Context,
-	in <-chan Event,
-	out chan<- Event,
+	// ctx context.Context,
+	rt NodeRuntime,
+	// in <-chan Event,
+	// out chan<- Event,
 ) error {
+	ctx := rt.Context()
 
 	for {
 		select {
-		case ev, ok := <-in:
+		case ev, ok := <-rt.Input():
 			if !ok {
 				return nil
 			}
@@ -32,11 +34,11 @@ func (n *AnswerNode) Run(
 				dbData + " + llm answer part 3",
 			}
 			for _, chunk := range stream {
-				out <- Event{
+				rt.Emit(&Event{
 					Type: "llm_chunk",
 					From: n.ID(),
 					Data: chunk,
-				}
+				})
 
 			}
 			return nil
@@ -69,14 +71,16 @@ func (n *TTSNode) Mode() NodeMode {
 }
 
 func (n *TTSNode) Run(
-	ctx context.Context,
-	in <-chan Event,
-	out chan<- Event,
+	// ctx context.Context,
+	rt NodeRuntime,
+	// in <-chan Event,
+	// out chan<- Event,
 ) error {
 
+	ctx := rt.Context()
 	for {
 		select {
-		case ev, ok := <-in:
+		case ev, ok := <-rt.Input():
 			if !ok {
 				return nil
 			}
@@ -89,11 +93,11 @@ func (n *TTSNode) Run(
 				text + "+ tts part 3",
 			}
 			for _, chunk := range audio {
-				out <- Event{
+				rt.Emit(&Event{
 					Type: "tts_audio",
 					From: n.ID(),
 					Data: chunk,
-				}
+				})
 
 			}
 			// close(in)
@@ -119,13 +123,13 @@ func (n *TTSNode) OutputTypes() []string {
 
 type OutputNodeTest struct {
 	// id     string
-	Output chan Event
+	Output chan *Event
 }
 
 func NewOutputNodeTest(id string) *OutputNodeTest {
 	return &OutputNodeTest{
 		// id:     id,
-		Output: make(chan Event, 32),
+		Output: make(chan *Event, 32),
 	}
 }
 func (n *OutputNodeTest) Mode() NodeMode {
@@ -134,14 +138,13 @@ func (n *OutputNodeTest) Mode() NodeMode {
 func (n *OutputNodeTest) ID() string { return "output" }
 
 func (n *OutputNodeTest) Run(
-	ctx context.Context,
-	in <-chan Event,
-	out chan<- Event,
+	// ctx context.Context,
+	rt NodeRuntime,
 ) error {
-
+	ctx := rt.Context()
 	for {
 		select {
-		case ev, ok := <-in:
+		case ev, ok := <-rt.Input():
 			if !ok {
 				log.Println("output close!")
 				return nil
@@ -192,11 +195,13 @@ func Test() {
 			{FromNode: "tts", OnEvent: "tts_audio", ToNode: "output"},
 		},
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	engine := NewEngine(ctx, cancel, dag)
+	ctx := context.Background()
+	engine := NewEngine(ctx, dag, &RuntimeContext{
+		sessionID: "test_session",
+	})
 	go func() {
 		// time.Sleep(200 * time.Millisecond)
-		engine.nodeInput["answer"] <- Event{
+		engine.nodeInput["answer"] <- &Event{
 			Type: "user_input",
 			From: "external",
 			Data: "Tell me about Golang",

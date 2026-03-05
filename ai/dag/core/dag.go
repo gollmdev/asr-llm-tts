@@ -21,7 +21,8 @@ type Node interface {
 	// OutputTypes() []string
 	Mode() NodeMode
 
-	Run(ctx context.Context, in <-chan Event, out chan<- Event) error
+	// Run(ctx context.Context, in <-chan Event, out chan<- Event)
+	Run(rt NodeRuntime) error
 }
 type NodeState struct {
 	mu      sync.Mutex
@@ -32,15 +33,19 @@ type NodeState struct {
 	upstreamActive  map[string]bool
 }
 type Event struct {
-	Type string
-	From string
-	Data any
+	Type      string
+	From      string
+	Data      any
+	SessionID string
 }
+type ConditionFunc func(*Event) bool
 
 type Edge struct {
 	FromNode string
 	OnEvent  string
 	ToNode   string
+	Cond     ConditionFunc // ⭐ 条件判断
+
 }
 
 type DAG struct {
@@ -50,10 +55,10 @@ type DAG struct {
 
 type Engine struct {
 	dag        *DAG
-	nodeInput  map[string]chan Event
+	nodeInput  map[string]chan *Event
 	nodeStates map[string]*NodeState
 
-	bus    chan Event
+	bus    chan *Event
 	ctx    context.Context
 	cancel context.CancelFunc
 	g      *errgroup.Group
@@ -62,21 +67,29 @@ type Engine struct {
 	waitOnce sync.Once
 	wg       sync.WaitGroup
 
+	// sessionID   string
+	rtx         *RuntimeContext
+	middlewares []EmitMiddleware
+
 	// Output chan Event // TUDO
 
 }
 
-func NewEngine(ctx context.Context, cancel context.CancelFunc, dag *DAG) *Engine {
+func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
+	ctx, cancel := context.WithCancel(ctx)
+
 	g, ctx := errgroup.WithContext(ctx)
 	// nodeG, nodeCtx := errgroup.WithContext(ctx)
 	e := &Engine{
-		dag:        dag,
-		nodeInput:  make(map[string]chan Event),
-		nodeStates: make(map[string]*NodeState),
-		bus:        make(chan Event, 64),
-		ctx:        ctx,
-		cancel:     cancel,
-		g:          g,
+		dag:         dag,
+		nodeInput:   make(map[string]chan *Event),
+		nodeStates:  make(map[string]*NodeState),
+		bus:         make(chan *Event, 64),
+		ctx:         ctx,
+		cancel:      cancel,
+		g:           g,
+		rtx:         rtx,
+		middlewares: make([]EmitMiddleware, 0),
 
 		// nodeG:      nodeG,
 		// nodeCtx:    nodeCtx,
@@ -88,7 +101,7 @@ func NewEngine(ctx context.Context, cancel context.CancelFunc, dag *DAG) *Engine
 	// }
 
 	for id := range dag.Nodes {
-		e.nodeInput[id] = make(chan Event, 32)
+		e.nodeInput[id] = make(chan *Event, 32)
 		e.nodeStates[id] = &NodeState{
 			upstreamActive: make(map[string]bool),
 			// upstreams: upstreamCount[id],
@@ -154,7 +167,9 @@ func (e *Engine) dispatchLoop() error {
 		}
 	}
 }
-
+func (e *Engine) emit(ev *Event) {
+	e.bus <- ev
+}
 func (e *Engine) startNode(id string) {
 
 	state := e.nodeStates[id]
@@ -166,6 +181,15 @@ func (e *Engine) startNode(id string) {
 	}
 	state.started = true
 	state.mu.Unlock()
+
+	// rt := NewNodeRuntime(id, e.middlewares, e.rtx, input, e.emit)
+
+	// 	nodeID:    id,
+	// 	sessionID: e.sessionID,
+	// 	input:     input,
+	// 	emit:      e.emit, // 绑定 engine 的 emit
+	// 	state:     make(map[string]any),
+	// }
 
 	// state.activeUpstreams++
 	// state.started = true
@@ -187,15 +211,16 @@ func (e *Engine) startNode(id string) {
 		// 	From: id,
 		// 	Data: nil,
 		// }
+		rt := e.newNodeRuntime(id)
 		err := e.dag.Nodes[id].Run(
-			e.ctx,
-			e.nodeInput[id],
-			e.bus,
+			rt,
+			// e.nodeInput[id],
+			// e.bus,
 		)
 		// close(e.nodeInput[id])
 
 		// e.onNodeExit(id)
-		e.bus <- Event{
+		e.bus <- &Event{
 			Type: "node_done",
 			From: id,
 			Data: nil,
@@ -207,6 +232,41 @@ func (e *Engine) startNode(id string) {
 		return err
 	})
 
+}
+
+func (e *Engine) newNodeRuntime(id string) *nodeRuntime {
+	input := e.nodeInput[id]
+
+	rt := &nodeRuntime{
+		nodeID: id,
+		// middlewares: e.middlewares,
+		rtx:   e.rtx,
+		input: input,
+		state: make(map[string]any),
+		ctx:   e.ctx, // engine context
+		// Cancel: e.cancel,
+	}
+	rt.emit = e.buildEmitChain(e.emit)
+	return rt
+	// rt := &nodeRuntime{
+}
+
+func (e *Engine) buildEmitChain(final EmitFunc) EmitFunc {
+	wrapped := final
+
+	// 倒序构建洋葱模型
+	for i := len(e.middlewares) - 1; i >= 0; i-- {
+		mw := e.middlewares[i]
+		// wrapped = func(ev Event) {
+		// 	mw(ev, next)
+		// }
+		wrapped = mw(wrapped)
+	}
+
+	return wrapped
+}
+func (e *Engine) Use(mw EmitMiddleware) {
+	e.middlewares = append(e.middlewares, mw)
 }
 
 // func (e *Engine) onNodeExit(id string) {
@@ -229,7 +289,7 @@ func (e *Engine) startNode(id string) {
 // 某个节点 e.wg.Done() 后
 // 可能 dispatch 又 startNode
 // 导致 wg.Wait() 提前返回或语义失效
-func (e *Engine) dispatch(ev Event) {
+func (e *Engine) dispatch(ev *Event) {
 	if ev.Type == "node_done" {
 		e.wg.Done()
 		log.Printf(">>>> end signal %s", ev.From)
@@ -239,6 +299,9 @@ func (e *Engine) dispatch(ev Event) {
 	for _, edge := range e.dag.Edges {
 
 		if edge.FromNode != ev.From || edge.OnEvent != ev.Type {
+			continue
+		}
+		if edge.Cond != nil && !edge.Cond(ev) {
 			continue
 		}
 		target := edge.ToNode

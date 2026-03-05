@@ -19,13 +19,16 @@ func Test2() {
 		},
 		Edges: []dag.Edge{
 			{FromNode: "input", OnEvent: "input", ToNode: "llm"},
-			{FromNode: "llm", OnEvent: "llm_chunk", ToNode: "tts"},
+			{FromNode: "llm", OnEvent: "llm_chunk", ToNode: "tts",
+				Cond: func(ev *dag.Event) bool {
+					return ev.Data.(string) != "你好"
+				}},
 			{FromNode: "llm", OnEvent: "llm_chunk", ToNode: "output"},
 			{FromNode: "tts", OnEvent: "tts_audio", ToNode: "output"},
 		},
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	session := dag.NewSession(ctx, cancel, dagModel)
+	ctx := context.Background()
+	session := dag.NewSession(ctx, dagModel, "session1")
 	// engine := dag.NewEngine(ctx, cancel, dagModel)
 	// go func() {
 	// 	// time.Sleep(200 * time.Millisecond)

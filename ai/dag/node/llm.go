@@ -1,7 +1,6 @@
 package node
 
 import (
-	"context"
 	"io"
 	"log"
 
@@ -18,16 +17,17 @@ func (n *LLMNode) Mode() dag.NodeMode {
 }
 
 func (n *LLMNode) Run(
-	ctx context.Context,
-	in <-chan dag.Event,
-	out chan<- dag.Event,
+	// ctx context.Context,
+	rt dag.NodeRuntime,
+	// in <-chan dag.Event,
+	// out chan<- dag.Event,
 ) error {
-	g, ctx := errgroup.WithContext(ctx)
+	g, ctx := errgroup.WithContext(rt.Context())
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case message, ok := <-in:
+		case message, ok := <-rt.Input():
 			if !ok {
 				log.Println("TTSStream completed")
 				return nil
@@ -90,11 +90,11 @@ func (n *LLMNode) Run(
 						// s.sendJson(SessionText, "message", chunk)
 						// s.FullResponse.WriteString(chunk)
 						// s.bus.Publish(event.Event{Type: event.EventLLMChunk, Data: chunk})
-						out <- dag.Event{
+						rt.Emit(&dag.Event{
 							Type: "llm_chunk",
 							From: n.ID(),
 							Data: chunk,
-						}
+						})
 					}
 				}
 			}

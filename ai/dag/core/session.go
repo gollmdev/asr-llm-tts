@@ -5,13 +5,13 @@ import "context"
 type Session struct {
 	// ID     string
 	engine *Engine
-	output chan Event
+	output chan *Event
 
 	// cancel context.CancelFunc
 }
 
-func NewSession(ctx context.Context, cancel context.CancelFunc, dag *DAG) *Session {
-	outputChan := make(chan Event, 64)
+func NewSession(ctx context.Context, dag *DAG, id string) *Session {
+	outputChan := make(chan *Event, 64)
 
 	// 创建 OutputNode 并注入 outputChan
 	outputNode := NewOutputNode("output", outputChan)
@@ -27,11 +27,14 @@ func NewSession(ctx context.Context, cancel context.CancelFunc, dag *DAG) *Sessi
 	// 		ToNode:   "final",
 	// 	},
 	// )
+	memory := NewMemoryStore()
 
-	engine := NewEngine(ctx, cancel, dag)
+	engine := NewEngine(ctx, dag, &RuntimeContext{
+		sessionID: id,
+		memory:    memory,
+	})
 
 	return &Session{
-		// ID:     generateSessionID(),
 		engine: engine,
 		output: outputChan,
 	}
@@ -39,13 +42,13 @@ func NewSession(ctx context.Context, cancel context.CancelFunc, dag *DAG) *Sessi
 
 func (s *Session) Dispatch(data any) {
 	s.engine.wg.Add(1)
-	s.engine.dispatch(Event{
+	s.engine.dispatch(&Event{
 		From: "input",
 		Type: "input",
 		Data: data,
 	})
 
-	s.engine.dispatch(Event{
+	s.engine.dispatch(&Event{
 		Type: "node_done",
 		From: "input",
 		Data: nil,
@@ -60,6 +63,6 @@ func (s *Session) Close() {
 	s.engine.Close()
 }
 
-func (s *Session) Output() <-chan Event {
+func (s *Session) Output() <-chan *Event {
 	return s.output
 }
