@@ -236,7 +236,7 @@ func (e *Engine) startNode(id string) {
 
 func (e *Engine) newNodeRuntime(id string) *nodeRuntime {
 	input := e.nodeInput[id]
-
+	// nodeCtx, nodeCancel := context.WithCancel(e.ctx)
 	rt := &nodeRuntime{
 		nodeID: id,
 		// middlewares: e.middlewares,
