@@ -711,7 +711,7 @@ func (s *Session) LLMConsumer() {
 func (s *Session) AudioRecognitionConsumer() {
 	sub, unsubscribe := s.bus.Subscribe(s.ctx, event.EventAudioChunk, event.EventAudioDone)
 	asrStream := asr.NewAsrStream(
-		unsubscribe,
+		// unsubscribe,
 		sub.Ch,
 		"paraformer-realtime-v2",
 		"pcm",
@@ -761,7 +761,7 @@ func (s *Session) TTsConsumer() {
 	// g, ctx := errgroup.WithContext(ctx)
 	// s.addConsumer("tts", unsubscribe)
 	ttsStream := tts.NewTtsStream(
-		unsubscribe,
+		// unsubscribe,
 		sub.Ch,
 		"cosyvoice-v3-flash",
 		"longwan_v3",

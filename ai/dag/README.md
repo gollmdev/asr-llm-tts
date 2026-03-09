@@ -46,9 +46,9 @@ Emit
   ↓
 middleware chain
   ↓
-dispatch
-  ↓
 bus
+  ↓
+dispatch
   ↓
 nodeInput
   ↓

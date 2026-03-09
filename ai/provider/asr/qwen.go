@@ -15,12 +15,12 @@ import (
 )
 
 type AsrStream struct {
-	model       string
-	format      string
-	sampleRate  int
-	apiKey      string
-	unsubscribe func()
-	ch          <-chan event.Event
+	model      string
+	format     string
+	sampleRate int
+	apiKey     string
+	// unsubscribe func()
+	ch <-chan event.Event
 	// done        chan struct{}
 	callback RecognitionCallback
 }
@@ -44,7 +44,7 @@ func (c *Callback) OnEvent(result *RecognitionResult) {
 
 }
 
-func NewAsrStream(unsubscribe func(),
+func NewAsrStream(
 	ch <-chan event.Event,
 	model,
 	format string,
@@ -54,10 +54,10 @@ func NewAsrStream(unsubscribe func(),
 	onCompleteFunc func(data string),
 ) *AsrStream {
 	return &AsrStream{
-		apiKey:      os.Getenv("DASHSCOPE_API_KEY"),
-		model:       model,
-		unsubscribe: unsubscribe,
-		ch:          ch,
+		apiKey: os.Getenv("DASHSCOPE_API_KEY"),
+		model:  model,
+		// unsubscribe: unsubscribe,
+		ch: ch,
 		// done:        done,
 		format:     format,
 		sampleRate: sampleRate,

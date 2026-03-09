@@ -1,4 +1,4 @@
-package engine
+package test
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func Test2() {
 	// 		Data: "Tell me about Golang",
 	// 	}
 	// }()
-	session.Dispatch("text", "你好")
+	session.Dispatch("audio", "你好")
 	session.Start()
 
 	var wg sync.WaitGroup

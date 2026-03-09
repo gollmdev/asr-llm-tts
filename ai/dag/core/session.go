@@ -42,19 +42,19 @@ func NewSession(ctx context.Context, dag *DAG, id string) *Session {
 	}
 }
 
-func (s *Session) Dispatch(data any) {
-	s.engine.wg.Add(1)
+func (s *Session) Dispatch(eventType string, data any) {
+	// s.engine.wg.Add(1)
 	s.engine.dispatch(&Event{
-		From: "input",
-		Type: "input",
+		From: "__external__",
+		Type: eventType,
 		Data: data,
 	})
 
-	s.engine.dispatch(&Event{
-		Type: "node_done",
-		From: "input",
-		Data: nil,
-	})
+	// s.engine.dispatch(&Event{
+	// 	Type: "node_done",
+	// 	From: "input",
+	// 	Data: nil,
+	// })
 }
 
 func (s *Session) Start() {

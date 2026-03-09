@@ -17,7 +17,7 @@ func LoggingMiddleware() EmitMiddleware {
 	return func(next EmitFunc) EmitFunc {
 		return func(ev *Event) {
 			// logger.Infof("node=%s emit type=%s", nodeID, ev.Type)
-			log.Printf("node=%s emit type=%s", "nodeID", ev.Type)
+			log.Printf(">>>>> node=%s emit type=%s", "nodeID", ev.Type)
 			next(ev)
 		}
 	}
