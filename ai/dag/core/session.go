@@ -34,7 +34,7 @@ func NewSession(ctx context.Context, dag *DAG, id string) *Session {
 		memory:    memory,
 	})
 
-	engine.Use(LoggingMiddleware())
+	// engine.Use(LoggingMiddleware())
 
 	return &Session{
 		engine: engine,

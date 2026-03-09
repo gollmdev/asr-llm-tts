@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -235,15 +236,15 @@ type SpeechSynthesizer struct {
 	additional  map[string]any
 
 	// runtime
-	conn            *websocket.Conn
-	dialer          *websocket.Dialer
-	startCh         chan struct{}
-	completeCh      chan struct{}
-	closed          chan struct{}
-	isStarted       bool
-	audioBuf        []byte
-	asyncCall       bool
-	callback        ResultCallback
+	conn       *websocket.Conn
+	dialer     *websocket.Dialer
+	startCh    chan struct{}
+	completeCh chan struct{}
+	closed     chan struct{}
+	isStarted  bool
+	audioBuf   []byte
+	// asyncCall       bool
+	// callback        ResultCallback
 	lastResponse    map[string]any
 	lastRequestID   string
 	closeWSAfterUse bool
@@ -254,10 +255,11 @@ type SpeechSynthesizer struct {
 	recvAudioMillis float64
 	g               *errgroup.Group
 	taskID          string
+	message         chan *StreamAudioMessage
 }
 
 // NewSpeechSynthesizer creates a synthesizer.
-func NewSpeechSynthesizer(apiKey,
+func NewSpeechSynthesizer(
 	model, voice string,
 	fmt AudioFormat,
 	// volume int,
@@ -268,7 +270,8 @@ func NewSpeechSynthesizer(apiKey,
 	// instruction *string,
 	// languageHints []string,
 	// headers http.Header,
-	callback ResultCallback,
+	// message chan *StreamAudioMessage,
+	// callback ResultCallback,
 	g *errgroup.Group,
 	// workspace string,
 	// additional map[string]any
@@ -282,9 +285,9 @@ func NewSpeechSynthesizer(apiKey,
 	// if url == "" {
 	// 	return nil, errors.New("url is required")
 	// }
-	if apiKey == "" {
-		return nil, errors.New("apikey is required")
-	}
+	// if apiKey == "" {
+	// 	return nil, errors.New("apikey is required")
+	// }
 
 	// af := fmt.Format
 	// if strings.ToLower(af) == "default" {
@@ -297,27 +300,28 @@ func NewSpeechSynthesizer(apiKey,
 
 	s := &SpeechSynthesizer{
 		url:       "wss://dashscope.aliyuncs.com/api-ws/v1/inference/",
-		apiKey:    apiKey,
+		apiKey:    os.Getenv("DASHSCOPE_API_KEY"),
 		headers:   http.Header{}, //headers.Clone(), headers := http.Header{}
 		workspace: "",
 		model:     model,
 		voice:     voice,
 		aformat:   fmt,
 		// sampleRate:      sr,
-		volume:          50,
-		speechRate:      1.0,
-		pitchRate:       1.0,
-		seed:            0,
-		synthType:       0,
-		instruction:     nil,
-		langHints:       nil,
-		additional:      nil,
-		dialer:          &websocket.Dialer{HandshakeTimeout: 5 * time.Second},
-		startCh:         make(chan struct{}, 1),
-		completeCh:      make(chan struct{}, 1),
-		closed:          make(chan struct{}, 1),
-		asyncCall:       callback != nil,
-		callback:        callback,
+		volume:      50,
+		speechRate:  1.0,
+		pitchRate:   1.0,
+		seed:        0,
+		synthType:   0,
+		instruction: nil,
+		langHints:   nil,
+		additional:  nil,
+		dialer:      &websocket.Dialer{HandshakeTimeout: 5 * time.Second},
+		startCh:     make(chan struct{}, 1),
+		completeCh:  make(chan struct{}, 1),
+		closed:      make(chan struct{}, 1),
+		// asyncCall:       callback != nil,
+		// callback:        callback,
+		message:         make(chan *StreamAudioMessage, 1),
 		closeWSAfterUse: true,
 		taskID:          uuid.NewString(),
 		g:               g,
@@ -508,10 +512,11 @@ func (s *SpeechSynthesizer) readLoop() error {
 				case s.completeCh <- struct{}{}:
 				default:
 				}
-				if s.callback != nil {
-					s.callback.OnComplete()
-					s.callback.OnClose()
-				}
+				// if s.callback != nil {
+				// 	s.callback.OnComplete()
+				// 	s.callback.OnClose()
+				// }
+				s.message <- &StreamAudioMessage{Event: "OnComplete"}
 				return nil
 			case eventFailed:
 				select {
@@ -522,15 +527,19 @@ func (s *SpeechSynthesizer) readLoop() error {
 				case s.completeCh <- struct{}{}:
 				default:
 				}
-				if s.callback != nil {
-					s.callback.OnError(string(payload))
-					s.callback.OnClose()
-				}
+				// if s.callback != nil {
+				// 	s.callback.OnError(string(payload))
+				// 	s.callback.OnClose()
+				// }
+				s.message <- &StreamAudioMessage{Event: "OnError", Err: errors.New("tts failed: " + string(payload))}
+
 				return errors.New("tts failed: " + string(payload))
 			case eventGenerated:
-				if s.callback != nil {
-					s.callback.OnEvent(string(payload))
-				}
+				// if s.callback != nil {
+				// 	s.callback.OnEvent(string(payload))
+				// }
+				s.message <- &StreamAudioMessage{Event: "OnEvent", Data: payload}
+
 			default:
 			}
 		case websocket.BinaryMessage:
@@ -539,11 +548,13 @@ func (s *SpeechSynthesizer) readLoop() error {
 			}
 			// approximate received audio ms for 16-bit mono
 			s.recvAudioMillis += float64(len(payload)) / (2 * float64(s.aformat.SampleRate) / 1000.0)
-			if s.callback == nil { // non-async, collect audio
-				s.audioBuf = append(s.audioBuf, payload...)
-			} else {
-				s.callback.OnData(payload)
-			}
+			// if s.callback == nil { // non-async, collect audio
+			// 	s.audioBuf = append(s.audioBuf, payload...)
+			// } else {
+			// 	s.callback.OnData(payload)
+			// }
+			s.message <- &StreamAudioMessage{Event: "OnData", Data: payload}
+
 		}
 	}
 }
@@ -560,11 +571,11 @@ func (s *SpeechSynthesizer) startStream(ctx context.Context) error {
 	s.startStreamTS = time.Now().UnixMilli()
 	s.firstPkgTS = -1
 	s.recvAudioMillis = 0
-	if s.callback == nil {
-		s.asyncCall = false
-	} else {
-		s.asyncCall = true
-	}
+	// if s.callback == nil {
+	// 	s.asyncCall = false
+	// } else {
+	// 	s.asyncCall = true
+	// }
 	if s.conn == nil {
 		if err := s.Connect(ctx); err != nil {
 			return err
@@ -581,9 +592,10 @@ func (s *SpeechSynthesizer) startStream(ctx context.Context) error {
 	select {
 	case <-s.startCh:
 		s.isStarted = true
-		if s.callback != nil {
-			s.callback.OnOpen()
-		}
+		// if s.callback != nil {
+		// 	s.callback.OnOpen()
+		// }
+		s.message <- &StreamAudioMessage{Event: "OnOpen"}
 		log.Println("SpeechSynthesizer started!")
 		return nil
 	case <-time.After(10 * time.Second):
@@ -608,6 +620,30 @@ func (s *SpeechSynthesizer) StreamingCall(ctx context.Context, text string) erro
 		}
 	}
 	return s.submitText(text)
+}
+
+// func (s *SpeechSynthesizer) Recv() (*StreamAudioMessage, error) {
+
+// 	for {
+// 		select {
+// 		case <-l.ctx.Done():
+// 			l.started = false
+// 			l.cancel() // 取消 context，通知 Call 方法退出
+// 			return nil, l.ctx.Err()
+// 		case msg, ok := <-l.message:
+// 			if !ok {
+// 				l.started = false
+// 				l.cancel() // 取消 context，通知 Call 方法退出
+// 				return nil, io.EOF
+// 			}
+// 			return msg, nil
+// 		}
+// 	}
+
+// }
+func (s *SpeechSynthesizer) Output() <-chan *StreamAudioMessage {
+
+	return s.message
 }
 
 // StreamingComplete stops the session and waits for remaining audio.
@@ -669,37 +705,38 @@ func (s *SpeechSynthesizer) AsyncStreamingComplete(timeout time.Duration) error 
 }
 
 // Call performs a simple one-shot synth. If no callback, returns audio bytes.
-func (s *SpeechSynthesizer) Call(ctx context.Context, text string, timeout time.Duration) ([]byte, error) {
-	if s.additional == nil {
-		s.additional = map[string]any{"enable_ssml": true}
-	} else {
-		s.additional["enable_ssml"] = true
-	}
-	if s.callback == nil {
-		s.asyncCall = false
-	}
-	if err := s.startStream(ctx); err != nil {
-		return nil, err
-	}
-	if err := s.submitText(text); err != nil {
-		return nil, err
-	}
-	if s.asyncCall {
-		if err := s.AsyncStreamingComplete(timeout); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-	if err := s.StreamingComplete(ctx, timeout); err != nil {
-		return nil, err
-	}
-	return s.audioBuf, nil
-}
+// func (s *SpeechSynthesizer) Call(ctx context.Context, text string, timeout time.Duration) ([]byte, error) {
+// 	if s.additional == nil {
+// 		s.additional = map[string]any{"enable_ssml": true}
+// 	} else {
+// 		s.additional["enable_ssml"] = true
+// 	}
+// 	if s.callback == nil {
+// 		s.asyncCall = false
+// 	}
+// 	if err := s.startStream(ctx); err != nil {
+// 		return nil, err
+// 	}
+// 	if err := s.submitText(text); err != nil {
+// 		return nil, err
+// 	}
+// 	if s.asyncCall {
+// 		if err := s.AsyncStreamingComplete(timeout); err != nil {
+// 			return nil, err
+// 		}
+// 		return nil, nil
+// 	}
+// 	if err := s.StreamingComplete(ctx, timeout); err != nil {
+// 		return nil, err
+// 	}
+// 	return s.audioBuf, nil
+// }
 
 func (s *SpeechSynthesizer) Close() {
 	if s.conn != nil {
 		_ = s.conn.Close()
 		s.conn = nil
+		close(s.message)
 	}
 }
 
@@ -755,7 +792,7 @@ func NewSpeechSynthesizerObjectPool(maxSize int, url, apiKey string, headers htt
 	}
 	for i := 0; i < maxSize; i++ {
 		// syn, err := NewSpeechSynthesizer(url, apiKey, model, voice, AudioFormatDefault, 50, 1.0, 1.0, 0, 0, nil, nil, headers, nil, workspace, nil)
-		syn, err := NewSpeechSynthesizer(apiKey, model, voice, AudioFormatDefault, nil, nil)
+		syn, err := NewSpeechSynthesizer(model, voice, AudioFormatDefault, nil)
 
 		if err != nil {
 			return nil, err
@@ -791,7 +828,7 @@ func (p *SpeechSynthesizerObjectPool) autoReconnect() {
 		}
 		p.mu.Unlock()
 		for _, po := range toRenew {
-			syn, err := NewSpeechSynthesizer(p.apiKey, p.model, p.voice, AudioFormatDefault, nil, nil)
+			syn, err := NewSpeechSynthesizer(p.model, p.voice, AudioFormatDefault, nil)
 			if err != nil {
 				continue
 			}
@@ -838,7 +875,7 @@ func (p *SpeechSynthesizerObjectPool) Borrow() *SpeechSynthesizer {
 		}
 	}
 	// exhausted: create a new unconnected object
-	syn, _ := NewSpeechSynthesizer(p.apiKey, p.model, p.voice, AudioFormatDefault, nil, nil)
+	syn, _ := NewSpeechSynthesizer(p.model, p.voice, AudioFormatDefault, nil)
 	return syn
 }
 

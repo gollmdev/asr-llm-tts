@@ -1,6 +1,7 @@
 package dag
 
 import (
+	"errors"
 	"log"
 )
 
@@ -39,7 +40,10 @@ func (n *OutputNode) Run(
 			n.output <- ev
 
 		case <-ctx.Done():
-			return ctx.Err()
+			close(n.output)
+			// return nil
+			return errors.New("output node context canceled!")
+			// return nil
 		}
 	}
 }

@@ -33,6 +33,8 @@ func Test2() {
 	}
 	ctx := context.Background()
 	session := dag.NewSession(ctx, dagModel, "session1")
+	session.Start()
+
 	// engine := dag.NewEngine(ctx, cancel, dagModel)
 	// go func() {
 	// 	// time.Sleep(200 * time.Millisecond)
@@ -42,13 +44,21 @@ func Test2() {
 	// 		Data: "Tell me about Golang",
 	// 	}
 	// }()
-	session.Dispatch("text", "你好")
-	session.Start()
+	session.Dispatch("text", "你可以干什么?")
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for ev := range session.Output() {
-			fmt.Println("FINAL OUTPUT:", ev.Data)
+			// for audio print length
+			if text, ok := ev.Data.(string); ok {
+				fmt.Println("FINAL OUTPUT:", text)
+
+			} else {
+				if audio, ok := ev.Data.([]byte); ok {
+					fmt.Println("FINAL OUTPUT LENGTH:", len(audio))
+				}
+
+			}
 		}
 	})
 	wg.Wait()

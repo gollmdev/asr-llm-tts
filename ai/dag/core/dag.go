@@ -163,6 +163,9 @@ func (e *Engine) Start() {
 
 	// 启动 dispatcher
 	e.g.Go(func() error {
+		defer func() {
+			log.Println(">>>node dispatcher loop stopped!")
+		}()
 		return e.dispatchLoop()
 	})
 	e.g.Go(func() error {
@@ -211,6 +214,7 @@ func (e *Engine) emit(ev *Event) {
 	e.bus <- ev
 }
 func (e *Engine) startNode(id string) {
+	// toNode of targets: tts -> output
 
 	state := e.nodeStates[id]
 
@@ -220,6 +224,19 @@ func (e *Engine) startNode(id string) {
 		return
 	}
 	state.started = true
+
+	targets := e.downstream[id]
+	for _, target := range targets {
+		state := e.nodeStates[target]
+		if !state.upstreamActive[id] {
+			// state.mu.Lock()
+			// state.activeUpstreams++
+			state.upstreamActive[id] = true
+			// state.mu.Unlock()
+
+		}
+
+	}
 	// state.mu.Unlock()
 
 	// rt := NewNodeRuntime(id, e.middlewares, e.rtx, input, e.emit)
@@ -236,6 +253,7 @@ func (e *Engine) startNode(id string) {
 	// // e.wg.Add(1)
 	// state.activeUpstreams++
 	e.wg.Add(1)
+	log.Printf(">>>node: %s +1", id)
 	e.g.Go(func() error {
 		log.Printf(">>>> start node  %s", id)
 		defer log.Printf(">>>> end node %s", id)
@@ -335,6 +353,10 @@ func (e *Engine) isNode(id string) bool {
 // 导致 wg.Wait() 提前返回或语义失效
 func (e *Engine) dispatch(ev *Event) {
 	if ev.Type == "node_done" {
+		e.wg.Done()
+		log.Printf(">>>node: %s -1", ev.From)
+
+		log.Printf(">>>> end signal %s", ev.From)
 		e.handleNodeDone(ev.From)
 		return
 	}
@@ -354,38 +376,48 @@ func (e *Engine) dispatch(ev *Event) {
 		// activeUpstreams 应该表示 “有多少个上游节点正在向我发送数据”，而不是收到了多少个事件
 		// 如果 toNode 的上游fromNode已经被激活，则不再增加 activeUpstreams
 		// 后续在fromNode结束时，通过edge找到toNode，对 activeUpstreams 进行相应的减少
-		isNode := e.isNode(ev.From)
-		state := e.nodeStates[target]
+		// isNode := e.isNode(ev.From)
+		// state := e.nodeStates[target]
 		// if _, ok := state.upstreams[ev.From]; ok {
 
 		// }
-		if isNode {
-			if !state.upstreamActive[ev.From] {
-				state.mu.Lock()
-				// state.activeUpstreams++
-				state.upstreamActive[ev.From] = true
-				state.mu.Unlock()
-				if node.Mode() == ModeLazy {
-					e.startNode(target)
-				}
-			}
+		// if isNode {
+		// 	if !state.upstreamActive[ev.From] {
+		// 		state.mu.Lock()
+		// 		// state.activeUpstreams++
+		// 		state.upstreamActive[ev.From] = true
+		// 		state.mu.Unlock()
+		// 		if node.Mode() == ModeLazy {
+		// 			e.startNode(target)
+		// 		}
+		// 	}
 
-		} else {
-			if node.Mode() == ModeLazy {
-				e.startNode(target)
-			}
+		// } else {
+		// 	if node.Mode() == ModeLazy {
+		// 		e.startNode(target)
+		// 	}
 
+		// }
+		if node.Mode() == ModeLazy {
+			e.startNode(target)
 		}
-
 		e.nodeInput[target] <- ev
+		// select {
+		// case :
+		// default:
+		// 	log.Println("node input channel is full, dropping event")
+		// }
 
-		// log.Printf(">>>>>>>> from  %s to %s receive %s", ev.From, target, ev.Data)
+		// if audio, ok := ev.Data.([]byte); ok {
+		// 	log.Printf(">>>>>>>> from  %s to %s receive %d bytes", ev.From, target, len(audio))
+		// } else {
+		// 	log.Printf(">>>>>>>> from  %s to %s receive %s", ev.From, target, ev.Data)
+		// }
 	}
 
 }
 func (e *Engine) handleNodeDone(nodeID string) {
-	e.wg.Done()
-	log.Printf(">>>> end signal %s", nodeID)
+
 	targets := e.downstream[nodeID]
 
 	for _, target := range targets {

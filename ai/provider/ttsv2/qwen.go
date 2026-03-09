@@ -2,31 +2,37 @@ package tts
 
 import (
 	"context"
+	"time"
+
 	// "gin-quickstart/pkg/eventbus"
 	"log"
 	"os"
-	"time"
 
 	"github.com/gollmdev/asr-llm-tts/ai/event"
 	"golang.org/x/sync/errgroup"
 )
 
-type Callback struct {
-	onDataFunc func(data []byte)
-}
+// type Callback struct {
+// 	onDataFunc func(data []byte)
+// }
 
-func (c *Callback) OnOpen()            { log.Println("open") }
-func (c *Callback) OnComplete()        { log.Println("tts complete") }
-func (c *Callback) OnError(msg string) { log.Println("error:", msg) }
-func (c *Callback) OnClose()           { log.Println("close") }
-func (c *Callback) OnEvent(msg string) {
-	// log.Println("event:", msg)
-}
-func (c *Callback) OnData(data []byte) {
-	c.onDataFunc(data)
-	// log.Printf("audio chunk: %d bytes\n", len(data))
-}
+// func (c *Callback) OnOpen()            { log.Println("open") }
+// func (c *Callback) OnComplete()        { log.Println("tts complete") }
+// func (c *Callback) OnError(msg string) { log.Println("error:", msg) }
+// func (c *Callback) OnClose()           { log.Println("close") }
+// func (c *Callback) OnEvent(msg string) {
+// 	// log.Println("event:", msg)
+// }
+// func (c *Callback) OnData(data []byte) {
+// 	c.onDataFunc(data)
+// 	// log.Printf("audio chunk: %d bytes\n", len(data))
+// }
 
+type StreamAudioMessage struct {
+	Event string
+	Data  []byte
+	Err   error
+}
 type TtsStream struct {
 	apiKey string
 	model  string
@@ -36,6 +42,7 @@ type TtsStream struct {
 	ch <-chan event.Event
 	// done        chan struct{}
 	callback ResultCallback
+	message  chan *StreamAudioMessage
 }
 
 func NewTtsStream(
@@ -49,9 +56,11 @@ func NewTtsStream(
 		voice:  voice,
 		fmt:    fmt,
 		// unsubscribe: unsubscribe,
-		ch: ch,
+		ch:      ch,
+		message: make(chan *StreamAudioMessage, 1),
 		// done:        done,
-		callback: &Callback{onDataFunc: onDataFunc},
+		// callback: &Callback{onDataFunc: onDataFunc},
+
 	}
 }
 
@@ -68,11 +77,11 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 
 	syn, err := NewSpeechSynthesizer(
-		l.apiKey,
 		l.model,
 		l.voice,
 		l.fmt,
-		l.callback,
+		// l.message,
+		// l.callback,
 		g)
 
 	if err != nil {
@@ -92,32 +101,33 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 			return nil
 		case message, ok := <-l.ch:
 			if !ok {
-				cancel()
-				log.Println("TTSStream event channel closed")
-				return nil
-			}
-			// log.Println("Start TTSStream for event:", message.Data.(string))
-			switch message.Type {
-			case event.EventLLMChunk:
-				text := message.Data.(string)
-				log.Println("Speech Synthesizer received chunk:", text)
-				if err := syn.StreamingCall(ctx, text); err != nil {
-					log.Println(err)
-					cancel()
-					return nil
-				}
-				// TTSStream(text, s.ctx, func(chunk []byte) {
-				// 	s.sendSafe(SessionAudio, chunk)
-				// })
-			case event.EventLLMDone:
 				if err := syn.StreamingComplete(ctx, 30*time.Second); err != nil {
 					log.Println(err)
 				}
 				// close(l.done)
 				log.Println(">> tss close session, tts is complete! ")
 				cancel()
+				log.Println("TTSStream event channel closed")
 				return nil
 			}
+			text := message.Data.(string)
+			log.Println("Speech Synthesizer received chunk:", text)
+			if err := syn.StreamingCall(ctx, text); err != nil {
+				log.Println(err)
+				cancel()
+				return nil
+			}
+			// log.Println("Start TTSStream for event:", message.Data.(string))
+			// switch message.Type {
+			// case event.EventLLMChunk:
+
+			// 	// TTSStream(text, s.ctx, func(chunk []byte) {
+			// 	// 	s.sendSafe(SessionAudio, chunk)
+			// 	// })
+			// case event.EventLLMDone:
+
+			// 	return nil
+			// }
 
 		}
 	}
