@@ -38,7 +38,7 @@ type Event struct {
 	Type      string
 	From      string
 	Data      any
-	SessionID string
+	SessionID int64
 }
 type ConditionFunc func(*Event) bool
 

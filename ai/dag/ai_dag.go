@@ -32,7 +32,7 @@ func Test2() {
 		},
 	}
 	ctx := context.Background()
-	session := dag.NewSession(ctx, dagModel, "session1")
+	session := dag.NewSession(ctx, dagModel, 1213465)
 	session.Start()
 
 	// engine := dag.NewEngine(ctx, cancel, dagModel)
@@ -44,7 +44,7 @@ func Test2() {
 	// 		Data: "Tell me about Golang",
 	// 	}
 	// }()
-	session.Dispatch("text", "你可以干什么?")
+	session.Dispatch("text", "你好?")
 
 	var wg sync.WaitGroup
 	wg.Go(func() {

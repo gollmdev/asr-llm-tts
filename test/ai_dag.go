@@ -32,7 +32,7 @@ func Test2() {
 		},
 	}
 	ctx := context.Background()
-	session := dag.NewSession(ctx, dagModel, "session1")
+	session := dag.NewSession(ctx, dagModel, 1325153)
 	// engine := dag.NewEngine(ctx, cancel, dagModel)
 	// go func() {
 	// 	// time.Sleep(200 * time.Millisecond)

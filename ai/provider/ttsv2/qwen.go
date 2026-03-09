@@ -75,7 +75,10 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 	// additional := map[string]any{"enable_ssml": true}
 	// cb := &Callback{}
 	ctx, cancel := context.WithCancel(ctx)
+	defer func() {
+		cancel()
 
+	}()
 	syn, err := NewSpeechSynthesizer(
 		l.model,
 		l.voice,
@@ -86,7 +89,6 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 
 	if err != nil {
 		log.Println(err)
-		cancel()
 		return err
 	}
 	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -95,8 +97,8 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			syn.conn.Close()
-			cancel()
+			// syn.conn.Close()
+			// cancel()
 			log.Println("Context done, exiting tts warp readLoop.")
 			return nil
 		case message, ok := <-l.ch:
@@ -106,7 +108,7 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 				}
 				// close(l.done)
 				log.Println(">> tss close session, tts is complete! ")
-				cancel()
+				// cancel()
 				log.Println("TTSStream event channel closed")
 				return nil
 			}
@@ -114,7 +116,7 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 			log.Println("Speech Synthesizer received chunk:", text)
 			if err := syn.StreamingCall(ctx, text); err != nil {
 				log.Println(err)
-				cancel()
+				// cancel()
 				return nil
 			}
 			// log.Println("Start TTSStream for event:", message.Data.(string))

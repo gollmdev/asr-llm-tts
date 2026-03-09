@@ -10,7 +10,7 @@ type Session struct {
 	// cancel context.CancelFunc
 }
 
-func NewSession(ctx context.Context, dag *DAG, id string) *Session {
+func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 	outputChan := make(chan *Event, 64)
 
 	// 创建 OutputNode 并注入 outputChan

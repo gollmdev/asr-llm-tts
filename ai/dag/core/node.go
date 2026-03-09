@@ -197,7 +197,7 @@ func Test() {
 	}
 	ctx := context.Background()
 	engine := NewEngine(ctx, dag, &RuntimeContext{
-		sessionID: "test_session",
+		sessionID: 12346,
 	})
 	go func() {
 		// time.Sleep(200 * time.Millisecond)

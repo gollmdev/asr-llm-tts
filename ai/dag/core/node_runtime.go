@@ -24,7 +24,7 @@ func (r *nodeRuntime) Context() context.Context {
 }
 
 type RuntimeContext struct {
-	sessionID string
+	sessionID int64
 	memory    MemoryStore
 	// Ctx       context.Context
 	// Cancel    context.CancelFunc

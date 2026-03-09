@@ -508,6 +508,8 @@ func (s *SpeechSynthesizer) readLoop() error {
 				default:
 				}
 			case eventFinished:
+				s.message <- &StreamAudioMessage{Event: "OnComplete"}
+				close(s.message)
 				select {
 				case s.completeCh <- struct{}{}:
 				default:
@@ -516,7 +518,6 @@ func (s *SpeechSynthesizer) readLoop() error {
 				// 	s.callback.OnComplete()
 				// 	s.callback.OnClose()
 				// }
-				s.message <- &StreamAudioMessage{Event: "OnComplete"}
 				return nil
 			case eventFailed:
 				select {
@@ -532,7 +533,7 @@ func (s *SpeechSynthesizer) readLoop() error {
 				// 	s.callback.OnClose()
 				// }
 				s.message <- &StreamAudioMessage{Event: "OnError", Err: errors.New("tts failed: " + string(payload))}
-
+				close(s.message)
 				return errors.New("tts failed: " + string(payload))
 			case eventGenerated:
 				// if s.callback != nil {
@@ -736,7 +737,7 @@ func (s *SpeechSynthesizer) Close() {
 	if s.conn != nil {
 		_ = s.conn.Close()
 		s.conn = nil
-		close(s.message)
+		// close(s.message)
 	}
 }
 
