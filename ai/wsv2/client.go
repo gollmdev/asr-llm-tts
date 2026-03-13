@@ -169,6 +169,8 @@ func (c *Client) ReadPump() error {
 	// c.Session.LLMConsumer()
 	// c.Session.MonitorSubSize()
 	c.Session.Start()
+	log.Printf(">>>node:  %d  start", c.Session.ID)
+
 	// c.Session.LLMTaskConsumer() // 启动 LLM 任务消费者
 
 	for {

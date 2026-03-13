@@ -71,9 +71,11 @@ type Engine struct {
 	wg       sync.WaitGroup
 
 	// sessionID   string
-	rtx         *RuntimeContext
-	middlewares []EmitMiddleware
-	downstream  map[string][]string
+	rtx             *RuntimeContext
+	middlewares     []EmitMiddleware
+	downstream      map[string][]string
+	isFirstDispatch bool
+	OnDAGDone       func()
 
 	// Output chan Event // TUDO
 
@@ -118,16 +120,16 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 
 	// nodeG, nodeCtx := errgroup.WithContext(ctx)
 	e := &Engine{
-		dag:         dag,
-		nodeInput:   make(map[string]chan *Event),
-		nodeStates:  make(map[string]*NodeState),
-		bus:         make(chan *Event, 64),
-		ctx:         ctx,
-		cancel:      cancel,
-		g:           g,
-		rtx:         rtx,
-		middlewares: make([]EmitMiddleware, 0),
-
+		dag:             dag,
+		nodeInput:       make(map[string]chan *Event),
+		nodeStates:      make(map[string]*NodeState),
+		bus:             make(chan *Event, 64),
+		ctx:             ctx,
+		cancel:          cancel,
+		g:               g,
+		rtx:             rtx,
+		middlewares:     make([]EmitMiddleware, 0),
+		isFirstDispatch: true,
 		// nodeG:      nodeG,
 		// nodeCtx:    nodeCtx,
 	}
@@ -153,6 +155,8 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 
 func (e *Engine) Start() {
 	// g, ctx := errgroup.WithContext(e.ctx)
+	e.wg.Add(1)
+	log.Printf(">>>node: %d start +1", e.rtx.sessionID)
 
 	// ⭐ 预启动 AlwaysOn 节点
 	for id, node := range e.dag.Nodes {
@@ -164,14 +168,19 @@ func (e *Engine) Start() {
 	// 启动 dispatcher
 	e.g.Go(func() error {
 		defer func() {
-			log.Println(">>>node dispatcher loop stopped!")
+			log.Printf(">>>node: %d dispatcher loop stopped!", e.rtx.sessionID)
 		}()
 		return e.dispatchLoop()
 	})
 	e.g.Go(func() error {
+		defer log.Printf(">>>node: %d Engine stopped!", e.rtx.sessionID)
+
 		e.wg.Wait()
 		// e.cancel() // 任何节点出错或完成都取消整个引擎
 		close(e.bus)
+		if e.OnDAGDone != nil {
+			e.OnDAGDone()
+		}
 
 		// delete nodeInput nodeState
 		for id := range e.nodeInput {
@@ -183,7 +192,6 @@ func (e *Engine) Start() {
 			delete(e.nodeStates, id)
 		}
 
-		log.Printf("Engine stopped!")
 		// return err
 		return nil
 	})
@@ -197,18 +205,10 @@ func (e *Engine) Close() {
 
 func (e *Engine) dispatchLoop() error {
 
-	for {
-		select {
-		case ev, ok := <-e.bus:
-			if !ok {
-				return nil
-			}
-			e.dispatch(ev)
-
-		case <-e.ctx.Done():
-			return nil
-		}
+	for ev := range e.bus {
+		e.dispatch(ev)
 	}
+	return nil
 }
 func (e *Engine) emit(ev *Event) {
 	e.bus <- ev
@@ -216,7 +216,11 @@ func (e *Engine) emit(ev *Event) {
 func (e *Engine) startNode(id string) {
 	// toNode of targets: tts -> output
 
-	state := e.nodeStates[id]
+	state, ok := e.nodeStates[id]
+	if !ok {
+		log.Printf("%s is not a valid node", id)
+		return
+	}
 
 	// state.mu.Lock()
 	if state.started {
@@ -252,8 +256,14 @@ func (e *Engine) startNode(id string) {
 	// state.started = true
 	// // e.wg.Add(1)
 	// state.activeUpstreams++
-	e.wg.Add(1)
-	log.Printf(">>>node: %s +1", id)
+	if !e.isFirstDispatch {
+		e.wg.Add(1)
+		log.Printf(">>>node: %d  %s +1", e.rtx.sessionID, id)
+	} else {
+		e.isFirstDispatch = false
+		log.Printf(">>>node: %d  %s use start", e.rtx.sessionID, id)
+	}
+
 	e.g.Go(func() error {
 		log.Printf(">>>> start node  %s", id)
 		defer log.Printf(">>>> end node %s", id)
@@ -278,15 +288,16 @@ func (e *Engine) startNode(id string) {
 		// close(e.nodeInput[id])
 
 		// e.onNodeExit(id)
+
+		state.mu.Lock()
+		state.done = true
+		state.mu.Unlock()
+
 		e.bus <- &Event{
 			Type: "node_done",
 			From: id,
 			Data: nil,
 		}
-		state.mu.Lock()
-		state.done = true
-		state.mu.Unlock()
-
 		return err
 	})
 
@@ -352,9 +363,10 @@ func (e *Engine) isNode(id string) bool {
 // 可能 dispatch 又 startNode
 // 导致 wg.Wait() 提前返回或语义失效
 func (e *Engine) dispatch(ev *Event) {
+	log.Printf("dispatch %s %s", ev.From, ev.Type)
 	if ev.Type == "node_done" {
 		e.wg.Done()
-		log.Printf(">>>node: %s -1", ev.From)
+		log.Printf(">>>node:  %d  %s -1", e.rtx.sessionID, ev.From)
 
 		log.Printf(">>>> end signal %s", ev.From)
 		e.handleNodeDone(ev.From)
@@ -422,7 +434,11 @@ func (e *Engine) handleNodeDone(nodeID string) {
 
 	for _, target := range targets {
 
-		state := e.nodeStates[target]
+		state, ok := e.nodeStates[target]
+		if !ok {
+			log.Printf("error: invalid node %s", target)
+			continue
+		}
 
 		state.mu.Lock()
 

@@ -15,7 +15,7 @@ type TTSNode struct {
 
 func (n *TTSNode) ID() string { return "tts" }
 func (n *TTSNode) Mode() dag.NodeMode {
-	return dag.ModeAlwaysOn
+	return dag.ModeLazy
 }
 
 func (n *TTSNode) Run(

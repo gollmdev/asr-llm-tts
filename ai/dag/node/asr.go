@@ -25,7 +25,11 @@ func (n *ASRNode) Run(
 			if !ok {
 				return nil
 			}
-			text := ev.Data.(string)
+			text, ok := ev.Data.(string)
+			if !ok {
+				// return nil
+				continue
+			}
 			rt.Emit(&dag.Event{
 				Type: "asr_test",
 				From: n.ID(),

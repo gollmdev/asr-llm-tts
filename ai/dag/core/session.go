@@ -1,9 +1,12 @@
 package dag
 
-import "context"
+import (
+	"context"
+	"log"
+)
 
 type Session struct {
-	// ID     string
+	ID     int64
 	engine *Engine
 	output chan *Event
 
@@ -33,12 +36,17 @@ func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 		sessionID: id,
 		memory:    memory,
 	})
+	engine.OnDAGDone = func() {
+		log.Printf(">>>node: %d DAG done!", id)
+		close(outputChan)
+	}
 
 	// engine.Use(LoggingMiddleware())
 
 	return &Session{
 		engine: engine,
 		output: outputChan,
+		ID:     id,
 	}
 }
 

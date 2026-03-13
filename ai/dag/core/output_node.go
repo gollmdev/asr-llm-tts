@@ -33,14 +33,14 @@ func (n *OutputNode) Run(
 		case ev, ok := <-rt.Input():
 			if !ok {
 				log.Println("output close!")
-				close(n.output)
+				// close(n.output)
 				return nil
 			}
 			// 直接推给 Session
 			n.output <- ev
 
 		case <-ctx.Done():
-			close(n.output)
+			// close(n.output)
 			// return nil
 			return errors.New("output node context canceled!")
 			// return nil

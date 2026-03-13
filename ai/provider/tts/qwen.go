@@ -86,7 +86,7 @@ func (l *TtsStream) Call(g *errgroup.Group, ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			syn.conn.Close()
+			// syn.conn.Close()
 			cancel()
 			log.Println("Context done, exiting tts warp readLoop.")
 			return nil
