@@ -381,6 +381,16 @@ func (c *Client) WritePump() error {
 				return nil
 			}
 			switch message.Type {
+			case "create_session":
+				data := message.Data.(map[string]any)
+				log.Printf("Sending create_session message: %v", data)
+				sendMsg := map[string]any{
+					"data":  data,
+					"event": "create_session",
+				}
+				if msg, err := json.Marshal(sendMsg); err == nil {
+					c.sendMessage(msg)
+				}
 			case "asr_text":
 				data := message.Data.(string)
 				log.Printf("Sending text message: %s", string(data))

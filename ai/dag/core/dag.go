@@ -170,7 +170,7 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 func (e *Engine) Start() {
 	// g, ctx := errgroup.WithContext(e.ctx)
 	e.wg.Add(1)
-	log.Printf(">>>node: %d start +1", e.rtx.sessionID)
+	log.Printf(">>>node: %d start +1", e.rtx.SessionID)
 
 	// ⭐ 预启动 AlwaysOn 节点
 	for id, node := range e.dag.Nodes {
@@ -182,12 +182,12 @@ func (e *Engine) Start() {
 	// 启动 dispatcher
 	e.g.Go(func() error {
 		defer func() {
-			log.Printf(">>>node: %d dispatcher loop stopped!", e.rtx.sessionID)
+			log.Printf(">>>node: %d dispatcher loop stopped!", e.rtx.SessionID)
 		}()
 		return e.dispatchLoop()
 	})
 	e.g.Go(func() error {
-		defer log.Printf(">>>node: %d Engine stopped!", e.rtx.sessionID)
+		defer log.Printf(">>>node: %d Engine stopped!", e.rtx.SessionID)
 
 		e.wg.Wait()
 		// e.cancel() // 任何节点出错或完成都取消整个引擎
@@ -272,10 +272,10 @@ func (e *Engine) startNode(id string) {
 	// state.activeUpstreams++
 	if !e.isFirstDispatch {
 		e.wg.Add(1)
-		log.Printf(">>>node: %d  %s +1", e.rtx.sessionID, id)
+		log.Printf(">>>node: %d  %s +1", e.rtx.SessionID, id)
 	} else {
 		e.isFirstDispatch = false
-		log.Printf(">>>node: %d  %s use start +1", e.rtx.sessionID, id)
+		log.Printf(">>>node: %d  %s use start +1", e.rtx.SessionID, id)
 	}
 
 	e.g.Go(func() error {
@@ -383,14 +383,7 @@ func (e *Engine) isNode(id string) bool {
 // 导致 wg.Wait() 提前返回或语义失效
 func (e *Engine) dispatch(ev *Event) {
 	log.Printf("dispatch %s %s", ev.From, ev.Type)
-	if ev.Type == "node_done" {
-		e.wg.Done()
-		log.Printf(">>>node:  %d  %s -1", e.rtx.sessionID, ev.From)
 
-		log.Printf(">>>> end signal %s", ev.From)
-		e.handleNodeDone(ev.From)
-		return
-	}
 	targets := e.router.Route(ev)
 	for _, target := range targets {
 		node := e.dag.Nodes[target]
@@ -444,6 +437,13 @@ func (e *Engine) dispatch(ev *Event) {
 		// } else {
 		// 	log.Printf(">>>>>>>> from  %s to %s receive %s", ev.From, target, ev.Data)
 		// }
+	}
+	if ev.Type == "node_done" {
+		e.wg.Done()
+		log.Printf(">>>node:  %d  %s -1", e.rtx.SessionID, ev.From)
+
+		log.Printf(">>>> end signal %s", ev.From)
+		e.handleNodeDone(ev.From)
 	}
 
 }

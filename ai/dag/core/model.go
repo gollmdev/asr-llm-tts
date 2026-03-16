@@ -1,10 +1,12 @@
 package dag
 
 type RuntimeContext struct {
-	sessionID int64
-	memory    MemoryStore
+	UserID    int64
+	SessionID int64
+	Memory    MemoryStore
 	EnableTTS bool
 	Output    Emitter
+	Services  map[string]any
 	// Ctx       context.Context
 	// Cancel    context.CancelFunc
 }

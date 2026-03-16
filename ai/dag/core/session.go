@@ -13,6 +13,13 @@ type Session struct {
 
 	// cancel context.CancelFunc
 }
+type SessionConfig struct {
+	Ctx       context.Context
+	Dag       *DAG
+	SessionId int64
+	UserId    int64
+	Services  map[string]any
+}
 
 type ChannelEmitter struct {
 	ch chan *Event
@@ -21,7 +28,8 @@ type ChannelEmitter struct {
 func (e *ChannelEmitter) Emit(ev *Event) {
 	e.ch <- ev
 }
-func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
+
+func NewSession(config *SessionConfig) *Session {
 	outputChan := make(chan *Event, 64)
 
 	// 创建 OutputNode 并注入 outputChan
@@ -40,14 +48,16 @@ func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 	// )
 	memory := NewMemoryStore()
 	rtx := &RuntimeContext{
-		sessionID: id,
-		memory:    memory,
+		SessionID: config.SessionId,
+		Memory:    memory,
 		Output:    &ChannelEmitter{outputChan},
 		EnableTTS: false,
+		UserID:    config.UserId,
+		Services:  config.Services,
 	}
-	engine := NewEngine(ctx, dag, rtx)
+	engine := NewEngine(config.Ctx, config.Dag, rtx)
 	engine.OnDAGDone = func() {
-		log.Printf(">>>node: %d DAG done!", id)
+		log.Printf(">>>node: %d DAG done!", config.SessionId)
 		close(outputChan)
 	}
 
@@ -56,7 +66,7 @@ func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 	return &Session{
 		engine: engine,
 		output: outputChan,
-		ID:     id,
+		ID:     config.SessionId,
 		rtx:    rtx,
 	}
 }
