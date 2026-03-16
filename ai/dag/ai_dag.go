@@ -32,7 +32,12 @@ func Test2() {
 		},
 	}
 	ctx := context.Background()
-	session := dag.NewSession(ctx, dagModel, 1213465)
+	session := dag.NewSession(&dag.SessionConfig{
+		Ctx:       ctx,
+		Dag:       dagModel,
+		SessionId: 123,
+		UserId:    456,
+	})
 	session.Start()
 
 	// engine := dag.NewEngine(ctx, cancel, dagModel)
