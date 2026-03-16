@@ -14,6 +14,7 @@ type NodeRuntime interface {
 	SetState(key string, value any)
 	Group() *errgroup.Group
 	Context() context.Context
+	RuntimeContext() *RuntimeContext
 }
 
 type EmitFunc func(*Event)
@@ -89,4 +90,8 @@ func (r *nodeRuntime) SetState(key string, value any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.state[key] = value
+}
+
+func (r *nodeRuntime) RuntimeContext() *RuntimeContext {
+	return r.rtx
 }

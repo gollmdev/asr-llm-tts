@@ -14,14 +14,21 @@ type Session struct {
 	// cancel context.CancelFunc
 }
 
+type ChannelEmitter struct {
+	ch chan *Event
+}
+
+func (e *ChannelEmitter) Emit(ev *Event) {
+	e.ch <- ev
+}
 func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 	outputChan := make(chan *Event, 64)
 
 	// 创建 OutputNode 并注入 outputChan
-	outputNode := NewOutputNode("output", outputChan)
+	// outputNode := NewOutputNode("output", outputChan)
 
 	// 把 outputNode 加入 DAG
-	dag.Nodes["output"] = outputNode
+	// dag.Nodes["output"] = outputNode
 
 	// 例如把 answer 的 llm_chunk 送到 output
 	// dag.Edges = append(dag.Edges,
@@ -35,6 +42,7 @@ func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 	rtx := &RuntimeContext{
 		sessionID: id,
 		memory:    memory,
+		Output:    &ChannelEmitter{outputChan},
 		EnableTTS: false,
 	}
 	engine := NewEngine(ctx, dag, rtx)
@@ -43,7 +51,7 @@ func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 		close(outputChan)
 	}
 
-	// engine.Use(LoggingMiddleware())
+	engine.Use(LoggingMiddleware())
 
 	return &Session{
 		engine: engine,

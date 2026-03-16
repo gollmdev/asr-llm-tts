@@ -46,46 +46,24 @@ type Edge struct {
 }
 
 type DAG struct {
-	Nodes map[string]Node
-	Edges []Edge
-}
-
-type Engine struct {
-	dag        *DAG
-	nodeInput  map[string]chan *Event
-	nodeStates map[string]*NodeState
+	Nodes      map[string]Node
+	Edges      []Edge
+	downstream map[string][]string
+	upstreams  map[string]map[string]struct{}
 	router     *EventRouter
-
-	bus    chan *Event
-	ctx    context.Context
-	cancel context.CancelFunc
-	g      *errgroup.Group
-	// nodeG    *errgroup.Group
-	// nodeCtx  context.Context
-	waitOnce sync.Once
-	wg       sync.WaitGroup
-
-	// sessionID   string
-	rtx             *RuntimeContext
-	middlewares     []EmitMiddleware
-	downstream      map[string][]string
-	isFirstDispatch bool
-	OnDAGDone       func()
-
-	// Output chan Event // TUDO
-
 }
 
-// func buildDownstream(edges []Edge) map[string][]string {
-
-// 	m := map[string][]string{}
-
-// 	for _, e := range edges {
-// 		m[e.FromNode] = append(m[e.FromNode], e.ToNode)
-// 	}
-
-//		return m
-//	}
+func NewDAG(nodes map[string]Node, edges []Edge) *DAG {
+	upstreams, downstream := buildGraph(edges)
+	router := NewEventRouter(edges)
+	return &DAG{
+		Nodes:      nodes,
+		Edges:      edges,
+		upstreams:  upstreams,
+		downstream: downstream,
+		router:     router,
+	}
+}
 func buildGraph(edges []Edge) (
 	map[string]map[string]struct{},
 	map[string][]string,
@@ -108,6 +86,43 @@ func buildGraph(edges []Edge) (
 
 	return upstreams, downstream
 }
+
+type Engine struct {
+	dag        *DAG
+	nodeInput  map[string]chan *Event
+	nodeStates map[string]*NodeState
+
+	bus    chan *Event
+	ctx    context.Context
+	cancel context.CancelFunc
+	g      *errgroup.Group
+	// nodeG    *errgroup.Group
+	// nodeCtx  context.Context
+	waitOnce sync.Once
+	wg       sync.WaitGroup
+
+	// sessionID   string
+	rtx             *RuntimeContext
+	middlewares     []EmitMiddleware
+	isFirstDispatch bool
+	OnDAGDone       func()
+	downstream      map[string][]string
+	router          *EventRouter
+	// Output chan Event // TUDO
+
+}
+
+// func buildDownstream(edges []Edge) map[string][]string {
+
+// 	m := map[string][]string{}
+
+// 	for _, e := range edges {
+// 		m[e.FromNode] = append(m[e.FromNode], e.ToNode)
+// 	}
+
+//		return m
+//	}
+
 func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -125,6 +140,8 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 		rtx:             rtx,
 		middlewares:     make([]EmitMiddleware, 0),
 		isFirstDispatch: true,
+		router:          dag.router,
+		downstream:      dag.downstream,
 		// nodeG:      nodeG,
 		// nodeCtx:    nodeCtx,
 	}
@@ -133,7 +150,9 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 	// for _, edge := range dag.Edges {
 	// 	upstreamCount[edge.ToNode]++
 	// }
-	upstreams, downstream := buildGraph(dag.Edges)
+	// upstreams, downstream := buildGraph(dag.Edges)
+	upstreams := dag.upstreams
+	// downstream := dag.downstream
 	for id := range dag.Nodes {
 		e.nodeInput[id] = make(chan *Event, 32)
 		e.nodeStates[id] = &NodeState{
@@ -142,8 +161,8 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 			// upstreams: upstreamCount[id],
 		}
 	}
-	e.router = NewEventRouter(dag.Edges)
-	e.downstream = downstream
+	// e.router = NewEventRouter(dag.Edges)
+	// e.downstream = downstream
 	// e.downstream = buildDownstream(dag.Edges)
 	return e
 }
@@ -288,11 +307,15 @@ func (e *Engine) startNode(id string) {
 		state.done = true
 		state.mu.Unlock()
 
-		e.bus <- &Event{
+		// e.bus <- &Event{
+		// 	Type: "node_done",
+		// 	From: id,
+		// 	Data: nil,
+		// }
+		e.emit(&Event{
 			Type: "node_done",
 			From: id,
-			Data: nil,
-		}
+		})
 		return err
 	})
 
