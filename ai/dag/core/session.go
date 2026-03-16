@@ -9,6 +9,7 @@ type Session struct {
 	ID     int64
 	engine *Engine
 	output chan *Event
+	rtx    *RuntimeContext
 
 	// cancel context.CancelFunc
 }
@@ -31,11 +32,12 @@ func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 	// 	},
 	// )
 	memory := NewMemoryStore()
-
-	engine := NewEngine(ctx, dag, &RuntimeContext{
+	rtx := &RuntimeContext{
 		sessionID: id,
 		memory:    memory,
-	})
+		EnableTTS: false,
+	}
+	engine := NewEngine(ctx, dag, rtx)
 	engine.OnDAGDone = func() {
 		log.Printf(">>>node: %d DAG done!", id)
 		close(outputChan)
@@ -47,7 +49,15 @@ func NewSession(ctx context.Context, dag *DAG, id int64) *Session {
 		engine: engine,
 		output: outputChan,
 		ID:     id,
+		rtx:    rtx,
 	}
+}
+
+func (s *Session) SetTTS(enable bool) {
+	// if s.engine != nil && s.engine.rtx != nil {
+	// 	s.engine.rtx.EnableTTS = enable
+	// }
+	s.rtx.EnableTTS = enable
 }
 
 func (s *Session) Dispatch(eventType string, data any) {

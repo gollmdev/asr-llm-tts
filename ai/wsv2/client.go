@@ -226,16 +226,17 @@ func (c *Client) ReadPump() error {
 			} else {
 				if objType, ok := obj["type"].(string); ok {
 					switch objType {
-					// case "config":
-					// 	if config, ok := obj["config"].(map[string]any); ok {
-					// 		if tts, ok := config["tts"].(bool); ok {
-					// 			if tts {
-					// 				c.Session.SessionConfig.TTSEnabled = true
-					// 				c.Session.TTsConsumer()
-					// 				log.Println("tts open!")
-					// 			}
-					// 		}
-					// 	}
+					case "config":
+						if config, ok := obj["config"].(map[string]any); ok {
+							if tts, ok := config["tts"].(bool); ok {
+								if tts {
+									// c.Session.SessionConfig.TTSEnabled = true
+									// c.Session.TTsConsumer()
+									c.Session.SetTTS(tts)
+									log.Println("tts open!")
+								}
+							}
+						}
 					case "message":
 
 						if text, ok := obj["content"].(string); ok {
@@ -247,26 +248,27 @@ func (c *Client) ReadPump() error {
 							c.Session.Dispatch("text", string(text))
 						}
 
-						// case "control":
-						// 	if config, ok := obj["config"].(map[string]any); ok {
-						// 		if tts, ok := config["tts"].(bool); ok {
-						// 			if tts != c.Session.SessionConfig.TTSEnabled {
+					case "control":
+						if config, ok := obj["config"].(map[string]any); ok {
+							if tts, ok := config["tts"].(bool); ok {
+								c.Session.SetTTS(tts)
+								// if tts != c.Session.SessionConfig.TTSEnabled {
 
-						// 				if tts {
-						// 					c.Session.SessionConfig.TTSEnabled = true
-						// 					// c.Session.waitConsumers("tts")
-						// 					c.Session.TTsConsumer()
-						// 					log.Println("tts open!")
-						// 				} else {
-						// 					c.Session.SessionConfig.TTSEnabled = false
-						// 					// c.Session.CancelConsumer("tts")
-						// 					c.Session.UnSubscribe(session.TTS)
-						// 					log.Println("tts close!")
-						// 				}
-						// 			}
+								// 	if tts {
+								// 		c.Session.SessionConfig.TTSEnabled = true
+								// 		// c.Session.waitConsumers("tts")
+								// 		c.Session.TTsConsumer()
+								// 		log.Println("tts open!")
+								// 	} else {
+								// 		c.Session.SessionConfig.TTSEnabled = false
+								// 		// c.Session.CancelConsumer("tts")
+								// 		c.Session.UnSubscribe(session.TTS)
+								// 		log.Println("tts close!")
+								// 	}
+								// }
 
-						// 		}
-						// 	}
+							}
+						}
 					}
 				}
 
@@ -277,7 +279,7 @@ func (c *Client) ReadPump() error {
 			// process binary message
 
 			// c.Session.PublishBinaryStream(message)
-			c.Session.Dispatch("audio", message)
+			c.DispatchBinaryStream(message)
 
 		default:
 			log.Printf("Received unsupported message type: %d", msgType)
@@ -285,6 +287,30 @@ func (c *Client) ReadPump() error {
 
 	}
 
+}
+func (c *Client) DispatchBinaryStream(bytes []byte) {
+	if len(bytes) == 0 {
+		return
+	}
+	msg_type := bytes[0]
+	log.Println("msg_type ", msg_type)
+	switch msg_type {
+	// case 0x01:
+	// 	s.AudioRecognitionConsumer()
+	case 0x02:
+		bytes = bytes[1:]
+		// log.Printf("Received binary message of length %d", len(bytes))
+		// s.bus.Publish(event.Event{Type: event.EventAudioChunk, Data: bytes})
+		c.Session.Dispatch("audio", bytes)
+
+	case 0x03:
+		// s.bus.Publish(event.Event{Type: event.EventAudioDone, Data: nil})
+		c.Session.Dispatch("audio_end", nil)
+	case 0x04:
+		c.cancel() // end session on audio done
+	default:
+		log.Printf("Unknown audio message type: %x", msg_type)
+	}
 }
 
 //    Client WS
@@ -355,6 +381,28 @@ func (c *Client) WritePump() error {
 				return nil
 			}
 			switch message.Type {
+			case "asr_text":
+				data := message.Data.(string)
+				log.Printf("Sending text message: %s", string(data))
+				sendMsg := map[string]interface{}{
+					"data": map[string]string{
+						"content": data,
+					},
+					"event": "asr_result",
+				}
+				if msg, err := json.Marshal(sendMsg); err == nil {
+					c.sendMessage(msg)
+				}
+			case "no_asr_text":
+				sendMsg := map[string]interface{}{
+					"data": map[string]string{
+						"content": "未识别到内容, 请重试",
+					},
+					"event": "no_asr_result",
+				}
+				if msg, err := json.Marshal(sendMsg); err == nil {
+					c.sendMessage(msg)
+				}
 			case "llm_chunk":
 				data := message.Data.(string)
 				log.Printf("Sending text message: %s", string(data))

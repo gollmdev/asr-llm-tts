@@ -7,7 +7,6 @@ import (
 
 	dag "github.com/gollmdev/asr-llm-tts/ai/dag/core"
 	tts "github.com/gollmdev/asr-llm-tts/ai/provider/ttsv2"
-	"golang.org/x/sync/errgroup"
 )
 
 type TTSNode struct {
@@ -31,37 +30,43 @@ func (n *TTSNode) Run(
 		cancel()
 
 	}()
-	g, ctx := errgroup.WithContext(ctx)
+	g := rt.Group()
+	// g, ctx := errgroup.WithContext(ctx)
 	// messsage :=
 	syn, err := tts.NewSpeechSynthesizer(
 		"cosyvoice-v3-flash",
 		"longwan_v3",
 		tts.PCM_22050HZ_MONO_16BIT,
+		ctx,
 		g)
 
 	if err != nil {
 		return err
 	}
 	g.Go(func() error {
+		defer func() {
+			log.Println("tts streaming call done!")
+			syn.Close()
+		}()
 		for {
 			select {
 			case <-ctx.Done():
 				return nil
 			case ev, ok := <-rt.Input():
 				if !ok {
-					if err := syn.StreamingComplete(ctx, 30*time.Second); err != nil {
+					if err := syn.StreamingComplete(30 * time.Second); err != nil {
 						log.Println(err)
 					}
-					cancel()
+					// cancel()
 					// close(l.done)
 					log.Println(">> tss close session, tts is complete! ")
 					return nil
 				}
 				text := ev.Data.(string)
 				log.Println("Speech Synthesizer received chunk:", text)
-				if err := syn.StreamingCall(ctx, text); err != nil {
+				if err := syn.StreamingCall(text); err != nil {
 					log.Println(err)
-					cancel()
+					// cancel()
 					return nil
 				}
 			}

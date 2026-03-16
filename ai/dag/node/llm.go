@@ -13,7 +13,7 @@ type LLMNode struct{}
 
 func (n *LLMNode) ID() string { return "llm" }
 func (n *LLMNode) Mode() dag.NodeMode {
-	return dag.ModeAlwaysOn
+	return dag.ModeLazy
 }
 
 func (n *LLMNode) Run(

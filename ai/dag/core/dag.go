@@ -34,12 +34,7 @@ type NodeState struct {
 
 	upstreamActive map[string]bool
 }
-type Event struct {
-	Type      string
-	From      string
-	Data      any
-	SessionID int64
-}
+
 type ConditionFunc func(*Event) bool
 
 type Edge struct {
@@ -261,7 +256,7 @@ func (e *Engine) startNode(id string) {
 		log.Printf(">>>node: %d  %s +1", e.rtx.sessionID, id)
 	} else {
 		e.isFirstDispatch = false
-		log.Printf(">>>node: %d  %s use start", e.rtx.sessionID, id)
+		log.Printf(">>>node: %d  %s use start +1", e.rtx.sessionID, id)
 	}
 
 	e.g.Go(func() error {
@@ -313,6 +308,7 @@ func (e *Engine) newNodeRuntime(id string) *nodeRuntime {
 		input: input,
 		state: make(map[string]any),
 		ctx:   e.ctx, // engine context
+		g:     e.g,   // engine errgroup
 		// Cancel: e.cancel,
 	}
 	rt.emit = e.buildEmitChain(e.emit)

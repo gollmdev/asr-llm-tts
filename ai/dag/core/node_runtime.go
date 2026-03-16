@@ -3,6 +3,8 @@ package dag
 import (
 	"context"
 	"sync"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type NodeRuntime interface {
@@ -10,6 +12,7 @@ type NodeRuntime interface {
 	Emit(*Event)
 	GetState(key string) any
 	SetState(key string, value any)
+	Group() *errgroup.Group
 	Context() context.Context
 }
 
@@ -23,17 +26,12 @@ func (r *nodeRuntime) Context() context.Context {
 	return r.ctx // 直接返回 nodeRuntime 的 ctx
 }
 
-type RuntimeContext struct {
-	sessionID int64
-	memory    MemoryStore
-	// Ctx       context.Context
-	// Cancel    context.CancelFunc
-}
 type nodeRuntime struct {
 	nodeID string
 	// middlewares []EmitMiddleware
 	ctx   context.Context
 	rtx   *RuntimeContext
+	g     *errgroup.Group
 	input <-chan *Event
 	emit  func(*Event)
 	mu    sync.RWMutex
@@ -59,8 +57,11 @@ func (r *nodeRuntime) Input() <-chan *Event {
 
 func (r *nodeRuntime) Emit(ev *Event) {
 	ev.From = r.nodeID
-	ev.SessionID = r.rtx.sessionID
+	ev.Rtx = r.rtx
 	r.emit(ev)
+}
+func (r *nodeRuntime) Group() *errgroup.Group {
+	return r.g
 }
 
 // 中间件洋葱模型构建方式

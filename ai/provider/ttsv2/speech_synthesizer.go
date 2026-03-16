@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -213,6 +211,12 @@ var (
 //	}
 //
 // SpeechSynthesizer encapsulates the websocket session.
+type StreamAudioMessage struct {
+	Event string
+	Data  []byte
+	Err   error
+}
+
 type SpeechSynthesizer struct {
 	// immutable setup
 	url       string
@@ -253,6 +257,7 @@ type SpeechSynthesizer struct {
 	startStreamTS   int64
 	firstPkgTS      int64
 	recvAudioMillis float64
+	ctx             context.Context
 	g               *errgroup.Group
 	taskID          string
 	message         chan *StreamAudioMessage
@@ -272,6 +277,7 @@ func NewSpeechSynthesizer(
 	// headers http.Header,
 	// message chan *StreamAudioMessage,
 	// callback ResultCallback,
+	ctx context.Context,
 	g *errgroup.Group,
 	// workspace string,
 	// additional map[string]any
@@ -324,6 +330,7 @@ func NewSpeechSynthesizer(
 		message:         make(chan *StreamAudioMessage, 1),
 		closeWSAfterUse: true,
 		taskID:          uuid.NewString(),
+		ctx:             ctx,
 		g:               g,
 	}
 	return s, nil
@@ -456,11 +463,19 @@ func (s *SpeechSynthesizer) reset() {
 	s.audioBuf = nil
 	s.lastResponse = nil
 }
+func (r *SpeechSynthesizer) send(msg *StreamAudioMessage) {
+	select {
+	case r.message <- msg:
+	case <-r.ctx.Done():
+		return
+	}
+}
 
 // readLoop reads messages and dispatches events.
 func (s *SpeechSynthesizer) readLoop() error {
 	defer func() {
 		close(s.closed)
+		close(s.message)
 		log.Println("SpeechSynthesizer readLoop exited")
 	}()
 	for {
@@ -508,8 +523,8 @@ func (s *SpeechSynthesizer) readLoop() error {
 				default:
 				}
 			case eventFinished:
-				s.message <- &StreamAudioMessage{Event: "OnComplete"}
-				close(s.message)
+				s.send(&StreamAudioMessage{Event: "OnComplete"})
+				// close(s.message)
 				select {
 				case s.completeCh <- struct{}{}:
 				default:
@@ -520,6 +535,8 @@ func (s *SpeechSynthesizer) readLoop() error {
 				// }
 				return nil
 			case eventFailed:
+				s.send(&StreamAudioMessage{Event: "OnError", Err: errors.New("tts failed: " + string(payload))})
+				// close(s.message)
 				select {
 				case s.startCh <- struct{}{}:
 				default:
@@ -532,14 +549,13 @@ func (s *SpeechSynthesizer) readLoop() error {
 				// 	s.callback.OnError(string(payload))
 				// 	s.callback.OnClose()
 				// }
-				s.message <- &StreamAudioMessage{Event: "OnError", Err: errors.New("tts failed: " + string(payload))}
-				close(s.message)
+
 				return errors.New("tts failed: " + string(payload))
 			case eventGenerated:
 				// if s.callback != nil {
 				// 	s.callback.OnEvent(string(payload))
 				// }
-				s.message <- &StreamAudioMessage{Event: "OnEvent", Data: payload}
+				s.send(&StreamAudioMessage{Event: "OnEvent", Data: payload})
 
 			default:
 			}
@@ -554,7 +570,7 @@ func (s *SpeechSynthesizer) readLoop() error {
 			// } else {
 			// 	s.callback.OnData(payload)
 			// }
-			s.message <- &StreamAudioMessage{Event: "OnData", Data: payload}
+			s.send(&StreamAudioMessage{Event: "OnData", Data: payload})
 
 		}
 	}
@@ -568,7 +584,7 @@ func (s *SpeechSynthesizer) sendJSON(obj map[string]any) error {
 	return s.conn.WriteMessage(websocket.TextMessage, b)
 }
 
-func (s *SpeechSynthesizer) startStream(ctx context.Context) error {
+func (s *SpeechSynthesizer) startStream() error {
 	s.startStreamTS = time.Now().UnixMilli()
 	s.firstPkgTS = -1
 	s.recvAudioMillis = 0
@@ -578,7 +594,7 @@ func (s *SpeechSynthesizer) startStream(ctx context.Context) error {
 	// 	s.asyncCall = true
 	// }
 	if s.conn == nil {
-		if err := s.Connect(ctx); err != nil {
+		if err := s.Connect(s.ctx); err != nil {
 			return err
 		}
 	}
@@ -596,7 +612,7 @@ func (s *SpeechSynthesizer) startStream(ctx context.Context) error {
 		// if s.callback != nil {
 		// 	s.callback.OnOpen()
 		// }
-		s.message <- &StreamAudioMessage{Event: "OnOpen"}
+		s.send(&StreamAudioMessage{Event: "OnOpen"})
 		log.Println("SpeechSynthesizer started!")
 		return nil
 	case <-time.After(10 * time.Second):
@@ -614,9 +630,9 @@ func (s *SpeechSynthesizer) submitText(text string) error {
 }
 
 // StreamingCall starts the session (if needed) and sends one text chunk.
-func (s *SpeechSynthesizer) StreamingCall(ctx context.Context, text string) error {
+func (s *SpeechSynthesizer) StreamingCall(text string) error {
 	if !s.isStarted {
-		if err := s.startStream(ctx); err != nil {
+		if err := s.startStream(); err != nil {
 			return err
 		}
 	}
@@ -648,7 +664,7 @@ func (s *SpeechSynthesizer) Output() <-chan *StreamAudioMessage {
 }
 
 // StreamingComplete stops the session and waits for remaining audio.
-func (s *SpeechSynthesizer) StreamingComplete(ctx context.Context, timeout time.Duration) error {
+func (s *SpeechSynthesizer) StreamingComplete(timeout time.Duration) error {
 	if !s.isStarted {
 		return errors.New("speech synthesizer not started")
 	}
@@ -661,7 +677,7 @@ func (s *SpeechSynthesizer) StreamingComplete(ctx context.Context, timeout time.
 		// 一个典型的多路复用等待模式
 		// 这个 select 会阻塞，直到 其中一个 case 条件触发。具体走哪个路径取决于运行时的情况
 		select {
-		case <-ctx.Done():
+		case <-s.ctx.Done():
 			log.Println("StreamingComplete canaceled by context")
 		case <-s.completeCh:
 			// log.Println("SpeechSynthesizer completed!")
@@ -672,9 +688,9 @@ func (s *SpeechSynthesizer) StreamingComplete(ctx context.Context, timeout time.
 		<-s.completeCh
 	}
 	s.isStarted = false
-	if s.closeWSAfterUse {
-		s.Close()
-	}
+	// if s.closeWSAfterUse {
+	// 	s.Close()
+	// }
 	return nil
 }
 
@@ -698,9 +714,9 @@ func (s *SpeechSynthesizer) AsyncStreamingComplete(timeout time.Duration) error 
 			<-s.completeCh
 		}
 		s.isStarted = false
-		if s.closeWSAfterUse {
-			s.Close()
-		}
+		// if s.closeWSAfterUse {
+		// 	s.Close()
+		// }
 	}()
 	return nil
 }
@@ -756,153 +772,153 @@ func (s *SpeechSynthesizer) Response() map[string]any { return s.lastResponse }
 // --- Object pool implementation ---
 //
 
-type SpeechSynthesizerObjectPool struct {
-	mu            sync.Mutex
-	pool          []*poolObj
-	available     []bool
-	borrowed      int
-	maxSize       int
-	stop          bool
-	url           string
-	apiKey        string
-	headers       http.Header
-	workspace     string
-	model         string
-	voice         string
-	reconnectBase int
-}
+// type SpeechSynthesizerObjectPool struct {
+// 	mu            sync.Mutex
+// 	pool          []*poolObj
+// 	available     []bool
+// 	borrowed      int
+// 	maxSize       int
+// 	stop          bool
+// 	url           string
+// 	apiKey        string
+// 	headers       http.Header
+// 	workspace     string
+// 	model         string
+// 	voice         string
+// 	reconnectBase int
+// }
 
-type poolObj struct {
-	syn         *SpeechSynthesizer
-	connectedAt time.Time
-}
+// type poolObj struct {
+// 	syn         *SpeechSynthesizer
+// 	connectedAt time.Time
+// }
 
-func NewSpeechSynthesizerObjectPool(maxSize int, url, apiKey string, headers http.Header, workspace, model, voice string) (*SpeechSynthesizerObjectPool, error) {
-	if maxSize <= 0 || maxSize > 100 {
-		return nil, errors.New("max_size must be 1..100")
-	}
-	p := &SpeechSynthesizerObjectPool{
-		maxSize:       maxSize,
-		url:           url,
-		apiKey:        apiKey,
-		headers:       headers.Clone(),
-		workspace:     workspace,
-		model:         model,
-		voice:         voice,
-		reconnectBase: 30,
-	}
-	for i := 0; i < maxSize; i++ {
-		// syn, err := NewSpeechSynthesizer(url, apiKey, model, voice, AudioFormatDefault, 50, 1.0, 1.0, 0, 0, nil, nil, headers, nil, workspace, nil)
-		syn, err := NewSpeechSynthesizer(model, voice, AudioFormatDefault, nil)
+// func NewSpeechSynthesizerObjectPool(maxSize int, url, apiKey string, headers http.Header, workspace, model, voice string) (*SpeechSynthesizerObjectPool, error) {
+// 	if maxSize <= 0 || maxSize > 100 {
+// 		return nil, errors.New("max_size must be 1..100")
+// 	}
+// 	p := &SpeechSynthesizerObjectPool{
+// 		maxSize:       maxSize,
+// 		url:           url,
+// 		apiKey:        apiKey,
+// 		headers:       headers.Clone(),
+// 		workspace:     workspace,
+// 		model:         model,
+// 		voice:         voice,
+// 		reconnectBase: 30,
+// 	}
+// 	for i := 0; i < maxSize; i++ {
+// 		// syn, err := NewSpeechSynthesizer(url, apiKey, model, voice, AudioFormatDefault, 50, 1.0, 1.0, 0, 0, nil, nil, headers, nil, workspace, nil)
+// 		syn, err := NewSpeechSynthesizer(model, voice, AudioFormatDefault, nil)
 
-		if err != nil {
-			return nil, err
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = syn.Connect(ctx)
-		cancel()
-		p.pool = append(p.pool, &poolObj{syn: syn, connectedAt: time.Now()})
-		p.available = append(p.available, true)
-	}
-	go p.autoReconnect()
-	return p, nil
-}
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// 		_ = syn.Connect(ctx)
+// 		cancel()
+// 		p.pool = append(p.pool, &poolObj{syn: syn, connectedAt: time.Now()})
+// 		p.available = append(p.available, true)
+// 	}
+// 	go p.autoReconnect()
+// 	return p, nil
+// }
 
-func (p *SpeechSynthesizerObjectPool) autoReconnect() {
-	for {
-		time.Sleep(1 * time.Second)
-		p.mu.Lock()
-		if p.stop {
-			p.mu.Unlock()
-			return
-		}
-		now := time.Now()
-		toRenew := []*poolObj{}
-		for i, po := range p.pool {
-			if !p.available[i] {
-				continue
-			}
-			if po.syn == nil || !po.syn.isConnected() || now.Sub(po.connectedAt) > time.Duration(p.reconnectBase+rand.Intn(10)-5)*time.Second {
-				p.available[i] = false
-				toRenew = append(toRenew, po)
-			}
-		}
-		p.mu.Unlock()
-		for _, po := range toRenew {
-			syn, err := NewSpeechSynthesizer(p.model, p.voice, AudioFormatDefault, nil)
-			if err != nil {
-				continue
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = syn.Connect(ctx)
-			cancel()
-			po.syn = syn
-			po.connectedAt = time.Now()
-			p.mu.Lock()
-			// mark available again
-			for i := range p.pool {
-				if p.pool[i] == po {
-					p.available[i] = true
-					break
-				}
-			}
-			p.mu.Unlock()
-		}
-	}
-}
+// func (p *SpeechSynthesizerObjectPool) autoReconnect() {
+// 	for {
+// 		time.Sleep(1 * time.Second)
+// 		p.mu.Lock()
+// 		if p.stop {
+// 			p.mu.Unlock()
+// 			return
+// 		}
+// 		now := time.Now()
+// 		toRenew := []*poolObj{}
+// 		for i, po := range p.pool {
+// 			if !p.available[i] {
+// 				continue
+// 			}
+// 			if po.syn == nil || !po.syn.isConnected() || now.Sub(po.connectedAt) > time.Duration(p.reconnectBase+rand.Intn(10)-5)*time.Second {
+// 				p.available[i] = false
+// 				toRenew = append(toRenew, po)
+// 			}
+// 		}
+// 		p.mu.Unlock()
+// 		for _, po := range toRenew {
+// 			syn, err := NewSpeechSynthesizer(p.model, p.voice, AudioFormatDefault, nil)
+// 			if err != nil {
+// 				continue
+// 			}
+// 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// 			_ = syn.Connect(ctx)
+// 			cancel()
+// 			po.syn = syn
+// 			po.connectedAt = time.Now()
+// 			p.mu.Lock()
+// 			// mark available again
+// 			for i := range p.pool {
+// 				if p.pool[i] == po {
+// 					p.available[i] = true
+// 					break
+// 				}
+// 			}
+// 			p.mu.Unlock()
+// 		}
+// 	}
+// }
 
-func (p *SpeechSynthesizerObjectPool) Shutdown() {
-	p.mu.Lock()
-	p.stop = true
-	for _, po := range p.pool {
-		if po.syn != nil {
-			po.syn.Close()
-		}
-	}
-	p.pool = nil
-	p.available = nil
-	p.mu.Unlock()
-}
+// func (p *SpeechSynthesizerObjectPool) Shutdown() {
+// 	p.mu.Lock()
+// 	p.stop = true
+// 	for _, po := range p.pool {
+// 		if po.syn != nil {
+// 			po.syn.Close()
+// 		}
+// 	}
+// 	p.pool = nil
+// 	p.available = nil
+// 	p.mu.Unlock()
+// }
 
-// Borrow returns a synthesizer; caller should Return it when done.
-func (p *SpeechSynthesizerObjectPool) Borrow() *SpeechSynthesizer {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for i, po := range p.pool {
-		if p.available[i] && po.syn != nil && po.syn.isConnected() {
-			p.available[i] = false
-			p.borrowed++
-			return po.syn
-		}
-	}
-	// exhausted: create a new unconnected object
-	syn, _ := NewSpeechSynthesizer(p.model, p.voice, AudioFormatDefault, nil)
-	return syn
-}
+// // Borrow returns a synthesizer; caller should Return it when done.
+// func (p *SpeechSynthesizerObjectPool) Borrow() *SpeechSynthesizer {
+// 	p.mu.Lock()
+// 	defer p.mu.Unlock()
+// 	for i, po := range p.pool {
+// 		if p.available[i] && po.syn != nil && po.syn.isConnected() {
+// 			p.available[i] = false
+// 			p.borrowed++
+// 			return po.syn
+// 		}
+// 	}
+// 	// exhausted: create a new unconnected object
+// 	syn, _ := NewSpeechSynthesizer(p.model, p.voice, AudioFormatDefault, nil)
+// 	return syn
+// }
 
-// Return returns a synthesizer to the pool.
-func (p *SpeechSynthesizerObjectPool) Return(s *SpeechSynthesizer) bool {
-	if s == nil {
-		return false
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for i, po := range p.pool {
-		if po.syn == s {
-			if p.available[i] {
-				return false
-			}
-			p.available[i] = true
-			if !s.isConnected() {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_ = s.Connect(ctx)
-				cancel()
-			}
-			po.connectedAt = time.Now()
-			p.borrowed--
-			return true
-		}
-	}
-	// if not from pool, drop
-	return false
-}
+// // Return returns a synthesizer to the pool.
+// func (p *SpeechSynthesizerObjectPool) Return(s *SpeechSynthesizer) bool {
+// 	if s == nil {
+// 		return false
+// 	}
+// 	p.mu.Lock()
+// 	defer p.mu.Unlock()
+// 	for i, po := range p.pool {
+// 		if po.syn == s {
+// 			if p.available[i] {
+// 				return false
+// 			}
+// 			p.available[i] = true
+// 			if !s.isConnected() {
+// 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// 				_ = s.Connect(ctx)
+// 				cancel()
+// 			}
+// 			po.connectedAt = time.Now()
+// 			p.borrowed--
+// 			return true
+// 		}
+// 	}
+// 	// if not from pool, drop
+// 	return false
+// }
