@@ -22,8 +22,11 @@ type Provider interface {
 
 // Message is a minimal chat message shape.
 type Message struct {
-	Role    string // system | user | assistant
-	Content string
+	Role       string     `json:"role"` // system | user | assistant | tool
+	Content    string     `json:"content,omitempty"`
+	Name       string     `json:"name,omitempty"` // tool name
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type ToolCall struct {

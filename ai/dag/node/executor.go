@@ -73,7 +73,7 @@ func (n *ToolExecutorNode) registeredTool(name string) ToolFunc {
 
 func (n *ToolExecutorNode) ID() string { return "tool_executor" }
 func (n *ToolExecutorNode) Mode() dag.NodeMode {
-	return dag.ModeAlwaysOn
+	return dag.ModeLazy
 }
 
 func (n *ToolExecutorNode) Run(

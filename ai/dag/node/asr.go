@@ -8,6 +8,7 @@ import (
 
 	dag "github.com/gollmdev/asr-llm-tts/ai/dag/core"
 	asr "github.com/gollmdev/asr-llm-tts/ai/provider/asrv2"
+	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -109,10 +110,16 @@ func (n *ASRNode) Run(
 				if msg.Event == "OnComplete" {
 					if msg.Data == "" {
 						log.Println("asr result is empty")
-						rt.Emit(&dag.Event{Type: "no_asr_text"})
+						rt.Emit(&dag.Event{From: n.ID(), Type: "no_asr_text"})
 						return nil
 					}
-					rt.Emit(&dag.Event{Data: msg.Data, Type: "asr_text"})
+					msg := []*llm.Message{
+						{
+							Role:    "user",
+							Content: msg.Data,
+						},
+					}
+					rt.Emit(&dag.Event{From: n.ID(), Data: msg, Type: "asr_text"})
 				}
 			}
 		}

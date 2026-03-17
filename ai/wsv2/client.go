@@ -223,7 +223,11 @@ func (c *Client) ReadPump() error {
 				// 	Type: event.EventTextChunk,
 				// 	Data: string(message),
 				// })
-				c.Session.Dispatch("text", string(message))
+				msg := &llm.Message{
+					Role:    "user",
+					Content: string(message),
+				}
+				c.Session.Dispatch("text", msg)
 			} else {
 				if objType, ok := obj["type"].(string); ok {
 					switch objType {
@@ -393,11 +397,11 @@ func (c *Client) WritePump() error {
 					c.sendMessage(msg)
 				}
 			case "asr_text":
-				data := message.Data.(string)
-				log.Printf("Sending text message: %s", string(data))
+				data := message.Data.([]*llm.Message)
+				log.Printf("Sending text message: %s", data[0].Content)
 				sendMsg := map[string]interface{}{
 					"data": map[string]string{
-						"content": data,
+						"content": data[0].Content,
 					},
 					"event": "asr_result",
 				}
