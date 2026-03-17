@@ -33,6 +33,8 @@ type NodeState struct {
 	upstreams map[string]struct{}
 
 	upstreamActive map[string]bool
+	receivedEvents map[string]struct{}
+	pendingEvents  []*Event
 }
 
 type ConditionFunc func(*Event) bool
@@ -91,6 +93,8 @@ type Engine struct {
 	dag        *DAG
 	nodeInput  map[string]chan *Event
 	nodeStates map[string]*NodeState
+	startRules map[string]NodeStartPolicy
+	closeRules map[string]NodeClosePolicy
 
 	bus    chan *Event
 	ctx    context.Context
@@ -133,6 +137,8 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 		dag:             dag,
 		nodeInput:       make(map[string]chan *Event),
 		nodeStates:      make(map[string]*NodeState),
+		startRules:      make(map[string]NodeStartPolicy),
+		closeRules:      make(map[string]NodeClosePolicy),
 		bus:             make(chan *Event, 64),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -157,8 +163,16 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 		e.nodeInput[id] = make(chan *Event, 32)
 		e.nodeStates[id] = &NodeState{
 			upstreamActive: make(map[string]bool),
+			receivedEvents: make(map[string]struct{}),
+			pendingEvents:  make([]*Event, 0),
 			upstreams:      upstreams[id],
 			// upstreams: upstreamCount[id],
+		}
+		if provider, ok := dag.Nodes[id].(NodeStartPolicyProvider); ok {
+			e.startRules[id] = provider.StartPolicy()
+		}
+		if provider, ok := dag.Nodes[id].(NodeClosePolicyProvider); ok {
+			e.closeRules[id] = provider.ClosePolicy()
 		}
 	}
 	// e.router = NewEventRouter(dag.Edges)
@@ -387,6 +401,7 @@ func (e *Engine) dispatch(ev *Event) {
 	targets := e.router.Route(ev)
 	for _, target := range targets {
 		node := e.dag.Nodes[target]
+		state := e.nodeStates[target]
 
 		// 开启延迟加载的 toNode 节点的 goroutine
 		// {FromNode: "answer", OnEvent: "llm_chunk", ToNode: "tts"}
@@ -422,9 +437,27 @@ func (e *Engine) dispatch(ev *Event) {
 		// 	}
 
 		// }
-		if node.Mode() == ModeLazy {
-			e.startNode(target)
+		state.mu.Lock()
+		state.receivedEvents[ev.Type] = struct{}{}
+
+		if node.Mode() == ModeLazy && !state.started {
+			state.pendingEvents = append(state.pendingEvents, ev)
+			shouldStart := e.shouldStartNode(target, state)
+			// state.mu.Unlock()
+
+			if shouldStart {
+				e.startNode(target)
+				e.flushPendingEvents(target)
+			}
+			// continue
 		}
+
+		state.mu.Unlock()
+
+		// if node.Mode() == ModeLazy {
+		// 	e.startNode(target)
+		// }
+
 		e.nodeInput[target] <- ev
 		// select {
 		// case :
@@ -447,6 +480,39 @@ func (e *Engine) dispatch(ev *Event) {
 	}
 
 }
+
+func (e *Engine) shouldStartNode(nodeID string, state *NodeState) bool {
+	rule, hasRule := e.startRules[nodeID]
+	if !hasRule {
+		return true
+	}
+
+	received := make(map[string]struct{}, len(state.receivedEvents))
+	for eventType := range state.receivedEvents {
+		received[eventType] = struct{}{}
+	}
+
+	return rule.CanStart(NodeStartContext{
+		NodeID:         nodeID,
+		ReceivedEvents: received,
+	})
+}
+
+func (e *Engine) flushPendingEvents(nodeID string) {
+	state, ok := e.nodeStates[nodeID]
+	if !ok {
+		return
+	}
+
+	// state.mu.Lock()
+	pending := state.pendingEvents
+	state.pendingEvents = nil
+	// state.mu.Unlock()
+
+	for _, pendingEvent := range pending {
+		e.nodeInput[nodeID] <- pendingEvent
+	}
+}
 func (e *Engine) handleNodeDone(nodeID string) {
 
 	targets := e.downstream[nodeID]
@@ -463,7 +529,8 @@ func (e *Engine) handleNodeDone(nodeID string) {
 
 		delete(state.upstreamActive, nodeID)
 
-		if len(state.upstreamActive) == 0 && !state.done {
+		// if len(state.upstreamActive) == 0 && !state.done {
+		if e.shouldCloseNode(target, state) {
 
 			close(e.nodeInput[target])
 			state.done = true
@@ -472,6 +539,27 @@ func (e *Engine) handleNodeDone(nodeID string) {
 
 		state.mu.Unlock()
 	}
+}
+
+func (e *Engine) shouldCloseNode(nodeID string, state *NodeState) bool {
+	if state.done {
+		return false
+	}
+	rule, hasRule := e.closeRules[nodeID]
+	if !hasRule {
+		return len(state.upstreamActive) == 0
+	}
+
+	received := make(map[string]struct{}, len(state.receivedEvents))
+	for eventType := range state.receivedEvents {
+		received[eventType] = struct{}{}
+	}
+
+	return rule.CanClose(NodeCloseContext{
+		NodeID:          nodeID,
+		ReceivedEvents:  received,
+		ActiveUpstreams: len(state.upstreamActive),
+	})
 }
 
 // func (e *Engine) dispatch2(ev *Event) {
