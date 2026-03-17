@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dag "github.com/gollmdev/asr-llm-tts/ai/dag/core"
+	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
 	"github.com/gollmdev/asr-llm-tts/ai/session"
 	"github.com/gorilla/websocket"
 	"golang.org/x/sync/errgroup"
@@ -421,6 +422,34 @@ func (c *Client) WritePump() error {
 						"content": data,
 					},
 					"event": "message",
+				}
+				if msg, err := json.Marshal(sendMsg); err == nil {
+					c.sendMessage(msg)
+				}
+			case "llm_tool_call":
+				data, ok := message.Data.([]llm.ToolCall)
+				if !ok {
+					continue
+				}
+				sendMsg := map[string]any{
+					"data": map[string]any{
+						"tool_calls": data,
+					},
+					"event": "tool_call",
+				}
+				if msg, err := json.Marshal(sendMsg); err == nil {
+					c.sendMessage(msg)
+				}
+			case "tool_result":
+				data, ok := message.Data.([]llm.ToolResult)
+				if !ok {
+					continue
+				}
+				sendMsg := map[string]any{
+					"data": map[string]any{
+						"tool_results": data,
+					},
+					"event": "tool_result",
 				}
 				if msg, err := json.Marshal(sendMsg); err == nil {
 					c.sendMessage(msg)

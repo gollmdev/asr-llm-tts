@@ -25,10 +25,23 @@ type Message struct {
 	Role    string // system | user | assistant
 	Content string
 }
+
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+type ToolResult struct {
+	ToolCallID string
+	Name       string
+	Content    string
+}
+
 type StreamChatMessage struct {
 	Event     string
 	Content   *string
 	err       error
 	usage     *map[string]any
-	toolCalls *map[string]*ToolCallState
+	ToolCalls *map[string]*ToolCallState
 }

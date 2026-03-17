@@ -146,89 +146,90 @@ func (l *LLMStream) Call(message []map[string]any, stream bool) (*StreamChatMess
 	client := &http.Client{Timeout: 0}
 	l.currentMessage = append(l.currentMessage, message...)
 	defer log.Println("llm-life: llm call done")
-	for {
-		if !l.started {
-			return nil, fmt.Errorf("llm stream not started")
-		}
-		// select {
-		// case <-ctx.Done():
+	// for {
+	// if !l.started {
+	// 	return nil, fmt.Errorf("llm stream not started")
+	// }
+	// select {
+	// case <-ctx.Done():
 
-		// 	return ctx.Err()
-		// default:
+	// 	return ctx.Err()
+	// default:
 
-		// }
-		l.toolCalls = make(map[string]*ToolCallState)
-		req, err := l.buildRequest(l.ctx, l.currentMessage, stream)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		// defer req.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			// Read body for debugging (limit size to avoid huge dumps)
-			data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			// panic()
-			log.Printf("request failed: %s - %s", resp.Status, string(data))
-			return nil, fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
-		}
-		// l.callback,
-		reader := NewChatStreamReader(resp.Body, l.toolCalls, l.message)
-		if stream {
-			reader.ReadLoop()
-		} else {
-			msg, err := reader.Read()
-			if err != nil {
-				return nil, err
-			}
-			if msg != nil {
-				return msg, nil
-			}
-		}
-
-		if len(l.toolCalls) != 0 {
-			i := 0
-			for id, call := range l.toolCalls {
-				assistantMessage := map[string]any{
-					"role":    "assistant",
-					"content": "",
-					"tool_calls": []map[string]any{
-						{
-							"id":    id,
-							"type":  "function",
-							"index": i,
-							"function": map[string]string{
-								"arguments": call.Arguments.String(),
-								"name":      call.Name,
-							},
-						},
-					},
-				}
-				l.currentMessage = append(l.currentMessage, assistantMessage)
-				i++
-
-				// tool call
-				log.Println("Tool call:", id, call.Name, call.Arguments.String())
-				// {"role": "tool", "content": function_output, "tool_call_id": completion.choices[0].message.tool_calls[0].id}
-				l.currentMessage = append(l.currentMessage, map[string]any{
-					"role":         "tool",
-					"name":         call.Name,
-					"content":      "多云",
-					"tool_call_id": id,
-				})
-			}
-
-			// no tool calls, finish after first response
-			// return nil
-		} else {
-			return nil, nil
-		}
-		// return nil
+	// }
+	l.toolCalls = make(map[string]*ToolCallState)
+	req, err := l.buildRequest(l.ctx, l.currentMessage, stream)
+	if err != nil {
+		return nil, err
 	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	// defer req.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// Read body for debugging (limit size to avoid huge dumps)
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// panic()
+		log.Printf("request failed: %s - %s", resp.Status, string(data))
+		return nil, fmt.Errorf("request failed: %s - %s", resp.Status, string(data))
+	}
+	// l.callback,
+	reader := NewChatStreamReader(resp.Body, l.message)
+	if stream {
+		reader.ReadLoop()
+	} else {
+		msg, err := reader.Read()
+		if err != nil {
+			return nil, err
+		}
+		if msg != nil {
+			return msg, nil
+		}
+	}
+	return nil, nil
+
+	// if len(l.toolCalls) != 0 {
+	// 	i := 0
+	// 	for id, call := range l.toolCalls {
+	// 		assistantMessage := map[string]any{
+	// 			"role":    "assistant",
+	// 			"content": "",
+	// 			"tool_calls": []map[string]any{
+	// 				{
+	// 					"id":    id,
+	// 					"type":  "function",
+	// 					"index": i,
+	// 					"function": map[string]string{
+	// 						"arguments": call.Arguments.String(),
+	// 						"name":      call.Name,
+	// 					},
+	// 				},
+	// 			},
+	// 		}
+	// 		l.currentMessage = append(l.currentMessage, assistantMessage)
+	// 		i++
+
+	// 		// tool call
+	// 		log.Println("Tool call:", id, call.Name, call.Arguments.String())
+	// 		// {"role": "tool", "content": function_output, "tool_call_id": completion.choices[0].message.tool_calls[0].id}
+	// 		l.currentMessage = append(l.currentMessage, map[string]any{
+	// 			"role":         "tool",
+	// 			"name":         call.Name,
+	// 			"content":      "多云",
+	// 			"tool_call_id": id,
+	// 		})
+	// 	}
+
+	// 	// no tool calls, finish after first response
+	// 	// return nil
+	// } else {
+	// 	return nil, nil
+	// }
+	// return nil, nil
+	// }
 
 }
 func (l *LLMStream) Generate(message []map[string]any) (*StreamChatMessage, error) {

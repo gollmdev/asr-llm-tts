@@ -31,11 +31,11 @@ type ChatStreamReader struct {
 }
 
 // h StreamEventCallback,
-func NewChatStreamReader(r io.Reader, toolCalls map[string]*ToolCallState, message chan *StreamChatMessage) *ChatStreamReader {
+func NewChatStreamReader(r io.Reader, message chan *StreamChatMessage) *ChatStreamReader {
 	return &ChatStreamReader{
 		reader: bufio.NewReader(r),
 		// handler:   h,
-		toolCalls: toolCalls,
+		toolCalls: make(map[string]*ToolCallState),
 		message:   message,
 	}
 }
@@ -159,7 +159,7 @@ func (c *ChatStreamReader) ReadLoop() {
 		// finish_reason
 		if fr, ok := choice["finish_reason"].(string); ok && fr == "tool_calls" {
 			// c.handler.OnToolCallFinish(c.toolCalls)
-			c.message <- &StreamChatMessage{Event: "OnToolCallFinish", toolCalls: &c.toolCalls}
+			c.message <- &StreamChatMessage{Event: "OnToolCallFinish", ToolCalls: &c.toolCalls}
 			// if c.OnToolCallFinish != nil {
 			// 	c.OnToolCallFinish(c.toolCalls)
 			// }

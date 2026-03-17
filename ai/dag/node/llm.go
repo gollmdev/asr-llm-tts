@@ -1,6 +1,8 @@
 package node
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log"
 
@@ -22,6 +24,11 @@ func (n *LLMNode) Run(
 	rt dag.NodeRuntime,
 ) error {
 	g, ctx := errgroup.WithContext(rt.Context())
+	tools := []map[string]any{}
+	if n.Tools != nil {
+		tools = n.Tools
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -31,69 +38,128 @@ func (n *LLMNode) Run(
 				log.Println("TTSStream completed")
 				return nil
 			}
-			tools := []map[string]any{}
-			if n.Tools != nil {
-				tools = n.Tools
+			history, err := n.buildInitialMessages(message)
+			if err != nil {
+				return err
 			}
-			// tools := []map[string]any{
-			// 	{
-			// 		"type": "function",
-			// 		"function": map[string]any{
-			// 			"name":        "get_weather",
-			// 			"description": "当你想查询指定城市的天气时非常有用。",
-			// 			"parameters": map[string]any{
-			// 				"type": "object",
-			// 				"properties": map[string]any{
-			// 					"location": map[string]string{
-			// 						"type":        "string",
-			// 						"description": "城市或县区，比如北京市、杭州市、余杭区等。",
-			// 					},
-			// 				},
-			// 				"required": []string{"location"},
-			// 			},
-			// 		},
-			// 	},
-			// }
-			llm := llm.NewQwenChatModel(&llm.ChatModelConfig{
-				Model: "qwen-plus",
-				Tools: tools,
-				Ctx:   ctx,
-				G:     g,
-			})
 
-			llm.Stream([]map[string]any{
-				{"role": "user", "content": message.Data.(string)},
-			})
-
-			for {
-				msg, err := llm.Recv()
-				if err != nil {
-					if err != io.EOF {
-						log.Println("LLMStream error:", err)
-					}
-					break
+			if err := n.runToolLoop(rt, ctx, g, tools, history); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Println("LLMStream error:", err)
 				}
-				if msg != nil {
-					if msg.Event == "OnText" && msg.Content != nil {
-						// onChunkReceived(*msg.Content)
-						chunk := *msg.Content
-						// s.sendJson(SessionText, "message", chunk)
-						// s.FullResponse.WriteString(chunk)
-						// s.bus.Publish(event.Event{Type: event.EventLLMChunk, Data: chunk})
-						// 模拟llm延迟发送
-						// time.Sleep(1 * time.Second)
-						rt.Emit(&dag.Event{
-							Type: "llm_chunk",
-							From: n.ID(),
-							Data: chunk,
-						})
-					}
-				}
+				return err
 			}
 
 			log.Println("llm consumer close!")
 
 			return nil
+		}
+	}
+}
+
+func (n *LLMNode) buildInitialMessages(message *dag.Event) ([]map[string]any, error) {
+	if message == nil {
+		return nil, errors.New("llm input is nil")
+	}
+
+	content, ok := message.Data.(string)
+	if !ok {
+		return nil, errors.New("llm input must be string")
+	}
+
+	switch message.Type {
+	case "text", "asr_text":
+		return []map[string]any{{"role": "user", "content": content}}, nil
+	default:
+		return nil, errors.New("unsupported llm input event: " + message.Type)
+	}
+}
+
+func (n *LLMNode) runToolLoop(
+	rt dag.NodeRuntime,
+	ctx context.Context,
+	g *errgroup.Group,
+	tools []map[string]any,
+	history []map[string]any,
+) error {
+	for {
+		stream := llm.NewQwenChatModel(&llm.ChatModelConfig{
+			Model: "qwen-plus",
+			Tools: tools,
+			Ctx:   ctx,
+			G:     g,
+		})
+
+		stream.Stream(history)
+
+		var pendingToolCalls []llm.ToolCall
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				if err != io.EOF {
+					return err
+				}
+				break
+			}
+			if msg == nil {
+				continue
+			}
+
+			switch msg.Event {
+			case "OnText":
+				if msg.Content == nil {
+					continue
+				}
+				rt.Emit(&dag.Event{
+					Type: "llm_chunk",
+					Data: *msg.Content,
+				})
+			case "OnToolCallFinish":
+				pendingToolCalls = llm.NormalizeToolCalls(msg.ToolCalls)
+				if len(pendingToolCalls) == 0 {
+					continue
+				}
+				history = append(history, llm.BuildAssistantToolCallMessage(pendingToolCalls))
+				rt.Emit(&dag.Event{
+					Type: "llm_tool_call",
+					Data: pendingToolCalls,
+				})
+			}
+		}
+
+		if len(pendingToolCalls) == 0 {
+			return nil
+		}
+
+		toolResults, err := n.waitToolResults(ctx, rt.Input())
+		if err != nil {
+			return err
+		}
+		if len(toolResults) == 0 {
+			return errors.New("tool executor returned empty results")
+		}
+
+		history = append(history, llm.BuildToolResultMessages(toolResults)...)
+	}
+}
+
+func (n *LLMNode) waitToolResults(ctx context.Context, input <-chan *dag.Event) ([]llm.ToolResult, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case ev, ok := <-input:
+			if !ok {
+				return nil, io.EOF
+			}
+			if ev == nil || ev.Type != "tool_result" {
+				continue
+			}
+			results, ok := ev.Data.([]llm.ToolResult)
+			if !ok {
+				return nil, errors.New("tool_result payload is invalid")
+			}
+			return results, nil
 		}
 	}
 }
