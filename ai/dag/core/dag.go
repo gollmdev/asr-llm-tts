@@ -399,6 +399,9 @@ func (e *Engine) dispatch(ev *Event) {
 	log.Printf("dispatch %s %s", ev.From, ev.Type)
 
 	targets := e.router.Route(ev)
+	if ev.From == "asr" {
+		log.Printf(">>>asr event: %s, targets: %v", ev.Type, targets)
+	}
 	for _, target := range targets {
 		node := e.dag.Nodes[target]
 		state := e.nodeStates[target]
@@ -443,13 +446,13 @@ func (e *Engine) dispatch(ev *Event) {
 		if node.Mode() == ModeLazy && !state.started {
 			state.pendingEvents = append(state.pendingEvents, ev)
 			shouldStart := e.shouldStartNode(target, state)
-			// state.mu.Unlock()
+			state.mu.Unlock()
 
 			if shouldStart {
 				e.startNode(target)
 				e.flushPendingEvents(target)
 			}
-			// continue
+			continue
 		}
 
 		state.mu.Unlock()

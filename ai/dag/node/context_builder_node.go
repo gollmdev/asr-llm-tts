@@ -25,15 +25,12 @@ func (n *ContextBuilderNode) Run(rt dag.NodeRuntime) error {
 			if !ok {
 				return nil
 			}
-			userText := ev.Data.(string)
+			userText := ev.Data.([]*llm.Message)
 
 			mem := rt.RuntimeContext().Memory
 
 			// 1️⃣ 写入 user
-			mem.Append(sessionID, &llm.Message{
-				Role:    "user",
-				Content: userText,
-			})
+			mem.Append(sessionID, userText[0])
 
 			// 2️⃣ 短期记忆
 			short := mem.Get(sessionID)

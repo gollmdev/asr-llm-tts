@@ -223,9 +223,11 @@ func (c *Client) ReadPump() error {
 				// 	Type: event.EventTextChunk,
 				// 	Data: string(message),
 				// })
-				msg := &llm.Message{
-					Role:    "user",
-					Content: string(message),
+				msg := []*llm.Message{
+					{
+						Role:    "user",
+						Content: string(message),
+					},
 				}
 				c.Session.Dispatch("text", msg)
 			} else {
@@ -250,7 +252,13 @@ func (c *Client) ReadPump() error {
 							// 	Type: event.EventTextChunk,
 							// 	Data: string(text),
 							// })
-							c.Session.Dispatch("text", string(text))
+							msg := []*llm.Message{
+								{
+									Role:    "user",
+									Content: text,
+								},
+							}
+							c.Session.Dispatch("text", msg)
 						}
 
 					case "control":
