@@ -399,9 +399,9 @@ func (e *Engine) dispatch(ev *Event) {
 	log.Printf("dispatch %s %s", ev.From, ev.Type)
 
 	targets := e.router.Route(ev)
-	if ev.From == "asr" {
-		log.Printf(">>>asr event: %s, targets: %v", ev.Type, targets)
-	}
+	// if ev.From == "asr" {
+	// 	log.Printf(">>>asr event: %s, targets: %v", ev.Type, targets)
+	// }
 	for _, target := range targets {
 		node := e.dag.Nodes[target]
 		state := e.nodeStates[target]
@@ -512,6 +512,7 @@ func (e *Engine) flushPendingEvents(nodeID string) {
 	state.pendingEvents = nil
 	// state.mu.Unlock()
 
+	// log.Printf(">>>node: flush pending events for node: %s", nodeID)
 	for _, pendingEvent := range pending {
 		e.nodeInput[nodeID] <- pendingEvent
 	}
@@ -531,10 +532,13 @@ func (e *Engine) handleNodeDone(nodeID string) {
 		state.mu.Lock()
 
 		delete(state.upstreamActive, nodeID)
+		// if target == "db" {
+		// 	log.Printf(">>>db node handle upstream done: %s, activeUpstreams: %d", nodeID, len(state.upstreamActive))
+		// }
 
 		// if len(state.upstreamActive) == 0 && !state.done {
 		if e.shouldCloseNode(target, state) {
-
+			// log.Printf(">>>node: close node: %s", target)
 			close(e.nodeInput[target])
 			state.done = true
 
@@ -546,6 +550,9 @@ func (e *Engine) handleNodeDone(nodeID string) {
 
 func (e *Engine) shouldCloseNode(nodeID string, state *NodeState) bool {
 	if state.done {
+		return false
+	}
+	if !state.started {
 		return false
 	}
 	rule, hasRule := e.closeRules[nodeID]

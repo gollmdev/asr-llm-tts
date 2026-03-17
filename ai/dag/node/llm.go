@@ -94,7 +94,7 @@ func (n *LLMNode) Run(
 						// s.FullResponse.WriteString(chunk)
 						// s.bus.Publish(event.Event{Type: event.EventLLMChunk, Data: chunk})
 						// 模拟llm延迟发送
-						// time.Sleep(1 * time.Second)
+						// time.Sleep(2 * time.Second)
 						rt.Emit(&dag.Event{
 							Type: "llm_chunk",
 							From: n.ID(),

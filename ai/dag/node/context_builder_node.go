@@ -68,6 +68,8 @@ func (n *ContextBuilderNode) Run(rt dag.NodeRuntime) error {
 				Type: "messages",
 				Data: messages,
 			})
+
+			return nil
 		}
 	}
 }
