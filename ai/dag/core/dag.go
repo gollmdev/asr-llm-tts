@@ -193,8 +193,8 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 
 func (e *Engine) Start() {
 	// g, ctx := errgroup.WithContext(e.ctx)
-	e.wg.Add(1)
-	log.Printf(">>>node: %d start +1", e.rtx.SessionID)
+	// e.wg.Add(1)
+	// log.Printf(">>>node: %d start +1", e.rtx.SessionID)
 
 	// ⭐ 预启动 AlwaysOn 节点
 	for id, node := range e.dag.Nodes {
@@ -210,6 +210,32 @@ func (e *Engine) Start() {
 		}()
 		return e.dispatchLoop()
 	})
+	// e.g.Go(func() error {
+	// 	defer log.Printf(">>>node: %d Engine stopped!", e.rtx.SessionID)
+
+	// 	e.wg.Wait()
+	// 	// e.cancel() // 任何节点出错或完成都取消整个引擎
+	// 	close(e.bus)
+	// 	if e.OnDAGDone != nil {
+	// 		e.OnDAGDone()
+	// 	}
+
+	// 	// delete nodeInput nodeState
+	// 	for id := range e.nodeInput {
+	// 		// close(e.nodeInput[id])
+	// 		delete(e.nodeInput, id)
+	// 		// delete(e.nodeStates, id)
+	// 	}
+	// 	for id := range e.nodeStates {
+	// 		delete(e.nodeStates, id)
+	// 	}
+
+	// 	// return err
+	// 	return nil
+	// })
+}
+
+func (e *Engine) Wait() {
 	e.g.Go(func() error {
 		defer log.Printf(">>>node: %d Engine stopped!", e.rtx.SessionID)
 
@@ -234,7 +260,9 @@ func (e *Engine) Start() {
 		return nil
 	})
 }
+
 func (e *Engine) Close() {
+	// e.waitOnce.Do(e.Wait)
 	if err := e.g.Wait(); err != nil {
 		log.Println("close error:", err)
 	}
@@ -242,11 +270,24 @@ func (e *Engine) Close() {
 }
 
 func (e *Engine) dispatchLoop() error {
-
-	for ev := range e.bus {
-		e.dispatch(ev)
+	for {
+		select {
+		case <-e.ctx.Done():
+			e.waitOnce.Do(e.Wait)
+			return nil
+		case ev, ok := <-e.bus:
+			if !ok {
+				return nil
+			}
+			e.dispatch(ev)
+		}
 	}
-	return nil
+
+	// return nil
+	// for ev := range e.bus {
+	// 	e.dispatch(ev)
+	// }
+	// return nil
 }
 func (e *Engine) emit(ev *Event) {
 	e.bus <- ev
@@ -279,27 +320,13 @@ func (e *Engine) startNode(id string) {
 		}
 
 	}
-	// state.mu.Unlock()
-
-	// rt := NewNodeRuntime(id, e.middlewares, e.rtx, input, e.emit)
-
-	// 	nodeID:    id,
-	// 	sessionID: e.sessionID,
-	// 	input:     input,
-	// 	emit:      e.emit, // 绑定 engine 的 emit
-	// 	state:     make(map[string]any),
-	// }
-
-	// state.activeUpstreams++
-	// state.started = true
-	// // e.wg.Add(1)
-	// state.activeUpstreams++
-	if !e.isFirstDispatch {
-		e.wg.Add(1)
-		log.Printf(">>>node: %d  %s +1", e.rtx.SessionID, id)
-	} else {
+	e.wg.Add(1)
+	log.Printf(">>>node: %d  %s +1", e.rtx.SessionID, id)
+	if e.isFirstDispatch {
+		// e.wg.Add(1)
 		e.isFirstDispatch = false
-		log.Printf(">>>node: %d  %s use start +1", e.rtx.SessionID, id)
+		e.waitOnce.Do(e.Wait)
+		log.Printf(">>>node: %d  %s start wait", e.rtx.SessionID, id)
 	}
 
 	e.g.Go(func() error {
@@ -307,16 +334,7 @@ func (e *Engine) startNode(id string) {
 		defer log.Printf(">>>> end node %s", id)
 
 		// defer e.wg.Done()
-		// state.mu.Lock()
-		// state.started = true
-		// // state.activeUpstreams++
-		// state.mu.Unlock()
 
-		// e.bus <- Event{
-		// 	Type: "node_start",
-		// 	From: id,
-		// 	Data: nil,
-		// }
 		rt := e.newNodeRuntime(id)
 		err := e.dag.Nodes[id].Run(
 			rt,
@@ -331,11 +349,6 @@ func (e *Engine) startNode(id string) {
 		state.done = true
 		state.mu.Unlock()
 
-		// e.bus <- &Event{
-		// 	Type: "node_done",
-		// 	From: id,
-		// 	Data: nil,
-		// }
 		e.emit(&Event{
 			Type: "node_done",
 			From: id,

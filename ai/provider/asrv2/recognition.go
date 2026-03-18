@@ -374,7 +374,7 @@ func (r *Recognition) readLoop() error {
 				log.Println("Recognition Error unmarshaling message:", err)
 				return err
 			}
-			log.Printf("Recognition Received message: %s", string(payload))
+			// log.Printf("Recognition Received message: %s", string(payload))
 
 			hdr, _ := obj["header"].(map[string]any)
 			if hdr == nil {

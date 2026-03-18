@@ -76,7 +76,7 @@ func (n *ASRNode) Run(
 					if !ok {
 						continue
 					}
-					log.Printf("AsrStream received binary message of length %d", len(audioData))
+					// log.Printf("AsrStream received binary message of length %d", len(audioData))
 					err := recognition.StreamingCall(audioData)
 					if err != nil {
 						return err

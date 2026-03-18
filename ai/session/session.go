@@ -325,7 +325,7 @@ func (s *Session) PublishBinaryStream(bytes []byte) {
 		return
 	}
 	msg_type := bytes[0]
-	log.Println("msg_type ", msg_type)
+	// log.Println("msg_type ", msg_type)
 	switch msg_type {
 	case 0x01:
 		s.AudioRecognitionConsumer()
