@@ -208,6 +208,7 @@ func (e *Engine) Start() {
 		defer func() {
 			log.Printf(">>>node: %d dispatcher loop stopped!", e.rtx.SessionID)
 		}()
+		log.Printf(">>>node: %d dispatcher loop start!", e.rtx.SessionID)
 		return e.dispatchLoop()
 	})
 	// e.g.Go(func() error {
@@ -246,16 +247,6 @@ func (e *Engine) Wait() {
 			e.OnDAGDone()
 		}
 
-		// delete nodeInput nodeState
-		for id := range e.nodeInput {
-			// close(e.nodeInput[id])
-			delete(e.nodeInput, id)
-			// delete(e.nodeStates, id)
-		}
-		for id := range e.nodeStates {
-			delete(e.nodeStates, id)
-		}
-
 		// return err
 		return nil
 	})
@@ -266,6 +257,15 @@ func (e *Engine) Close() {
 	if err := e.g.Wait(); err != nil {
 		log.Println("close error:", err)
 	}
+	// delete nodeInput nodeState
+	for id := range e.nodeInput {
+		// close(e.nodeInput[id])
+		delete(e.nodeInput, id)
+		// delete(e.nodeStates, id)
+	}
+	for id := range e.nodeStates {
+		delete(e.nodeStates, id)
+	}
 	e.cancel()
 }
 
@@ -273,8 +273,10 @@ func (e *Engine) dispatchLoop() error {
 	for {
 		select {
 		case <-e.ctx.Done():
+			// 只是建立连接，没有数据流动时，通过w.wait 关闭 bus channel，确保 dispatcher goroutine 能够正确退出，避免潜在的 goroutine 泄漏
 			e.waitOnce.Do(e.Wait)
-			return nil
+			// 如果直接退出可能会导致节点 goroutine 没有机会正确退出和清理资源
+			// return nil
 		case ev, ok := <-e.bus:
 			if !ok {
 				return nil

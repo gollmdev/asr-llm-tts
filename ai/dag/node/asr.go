@@ -48,12 +48,13 @@ func (n *ASRNode) Run(
 		timer := time.NewTimer(silenceTimeout)
 		defer func() {
 			timer.Stop()
-			recognition.Close()
+
 		}()
 
 		for {
 			select {
 			case <-ctx.Done():
+
 				log.Println("AsrStream context done")
 				return nil
 			case <-timer.C:
@@ -99,6 +100,7 @@ func (n *ASRNode) Run(
 			case <-ctx.Done():
 				// for range recognition.Output() {
 				// }
+				recognition.Close()
 				log.Println("AsrStream output context done")
 				return nil // 如果返回error 会导致 startNode返回 error并退出，进而导致 dispatcher 退出
 			case msg, ok := <-recognition.Output():
