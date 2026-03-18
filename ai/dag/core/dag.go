@@ -169,6 +169,21 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 		if provider, ok := dag.Nodes[id].(NodeClosePolicyProvider); ok {
 			e.closeRules[id] = provider.ClosePolicy()
 		}
+
+		// edges := e.dag.upstreams[id]
+
+		// for _, edge := range edges {
+
+		// 	// ✅ 关键：判断 InitCond
+		// 	// if edge.InitCond != nil {
+		// 	// 	if !edge.InitCond(rt) {
+		// 	// 		continue
+		// 	// 	}
+		// 	// }
+
+		// 	// 默认加入 upstream
+		// 	e.nodeStates[id].upstreamActive[edge.FromNode] = true
+		// }
 	}
 	// e.router = NewEventRouter(dag.Edges)
 	// e.downstream = downstream
