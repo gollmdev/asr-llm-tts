@@ -18,14 +18,11 @@ type OutputNode struct {
 //			output: out,
 //		}
 //	}
-//
-//	func (n *OutputNode) ClosePolicy() dag.NodeClosePolicy {
-//		return dag.AggregateClosePolicy{
-//			Required: dag.All(
-//				dag.Any(dag.HasEvent("llm_chunk")),
-//			),
-//		}
-//	}
+func (n *OutputNode) ClosePolicy() dag.NodeClosePolicy {
+	return dag.AggregateClosePolicy{
+		Required: dag.Any(dag.HasEvent("llm_chunk"), dag.HasEvent("no_asr_text")),
+	}
+}
 func (n *OutputNode) Mode() dag.NodeMode {
 	return dag.ModeLazy
 }

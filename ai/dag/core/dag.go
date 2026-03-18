@@ -29,8 +29,8 @@ type NodeState struct {
 	started bool
 	// upstreams int
 	// activeUpstreams int
-	done      bool
-	upstreams map[string]struct{}
+	done bool
+	// upstreams map[string]struct{}
 
 	upstreamActive map[string]bool
 	receivedEvents map[string]struct{}
@@ -50,8 +50,8 @@ type Edge struct {
 type DAG struct {
 	Nodes      map[string]Node
 	Edges      []Edge
-	downstream map[string][]string
-	upstreams  map[string]map[string]struct{}
+	downstream map[string][]Edge
+	upstreams  map[string][]Edge
 	router     *EventRouter
 }
 
@@ -67,26 +67,19 @@ func NewDAG(nodes map[string]Node, edges []Edge) *DAG {
 	}
 }
 func buildGraph(edges []Edge) (
-	map[string]map[string]struct{},
-	map[string][]string,
+	map[string][]Edge,
+	map[string][]Edge,
 ) {
 
-	upstreams := map[string]map[string]struct{}{}
-	downstream := map[string][]string{}
+	upstreams := make(map[string][]Edge)
+	downstreams := make(map[string][]Edge)
 
-	for _, e := range edges {
-
-		if upstreams[e.ToNode] == nil {
-			upstreams[e.ToNode] = map[string]struct{}{}
-		}
-
-		upstreams[e.ToNode][e.FromNode] = struct{}{}
-
-		downstream[e.FromNode] =
-			append(downstream[e.FromNode], e.ToNode)
+	for _, edge := range edges {
+		upstreams[edge.ToNode] = append(upstreams[edge.ToNode], edge)
+		downstreams[edge.FromNode] = append(downstreams[edge.FromNode], edge)
 	}
 
-	return upstreams, downstream
+	return upstreams, downstreams
 }
 
 type Engine struct {
@@ -110,8 +103,10 @@ type Engine struct {
 	middlewares     []EmitMiddleware
 	isFirstDispatch bool
 	OnDAGDone       func()
-	downstream      map[string][]string
-	router          *EventRouter
+	// downstream      map[string][]string
+	downstream map[string][]Edge
+	upstreams  map[string][]Edge
+	router     *EventRouter
 	// Output chan Event // TUDO
 
 }
@@ -157,7 +152,7 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 	// 	upstreamCount[edge.ToNode]++
 	// }
 	// upstreams, downstream := buildGraph(dag.Edges)
-	upstreams := dag.upstreams
+	// upstreams := dag.upstreams
 	// downstream := dag.downstream
 	for id := range dag.Nodes {
 		e.nodeInput[id] = make(chan *Event, 32)
@@ -165,7 +160,7 @@ func NewEngine(ctx context.Context, dag *DAG, rtx *RuntimeContext) *Engine {
 			upstreamActive: make(map[string]bool),
 			receivedEvents: make(map[string]struct{}),
 			pendingEvents:  make([]*Event, 0),
-			upstreams:      upstreams[id],
+			// upstreams:      upstreams[id],
 			// upstreams: upstreamCount[id],
 		}
 		if provider, ok := dag.Nodes[id].(NodeStartPolicyProvider); ok {
@@ -259,7 +254,7 @@ func (e *Engine) startNode(id string) {
 
 	targets := e.downstream[id]
 	for _, target := range targets {
-		state := e.nodeStates[target]
+		state := e.nodeStates[target.ToNode]
 		if !state.upstreamActive[id] {
 			// state.mu.Lock()
 			// state.activeUpstreams++
@@ -523,9 +518,9 @@ func (e *Engine) handleNodeDone(nodeID string) {
 
 	for _, target := range targets {
 
-		state, ok := e.nodeStates[target]
+		state, ok := e.nodeStates[target.ToNode]
 		if !ok {
-			log.Printf("error: invalid node %s", target)
+			log.Printf("error: invalid node %s", target.ToNode)
 			continue
 		}
 
@@ -537,9 +532,9 @@ func (e *Engine) handleNodeDone(nodeID string) {
 		// }
 
 		// if len(state.upstreamActive) == 0 && !state.done {
-		if e.shouldCloseNode(target, state) {
-			// log.Printf(">>>node: close node: %s", target)
-			close(e.nodeInput[target])
+		if e.shouldCloseNode(target.ToNode, state) {
+			// log.Printf(">>>node: close node: %s", target.ToNode)
+			close(e.nodeInput[target.ToNode])
 			state.done = true
 
 		}
