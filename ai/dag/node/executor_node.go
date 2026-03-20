@@ -106,10 +106,12 @@ func (n *ToolExecutorNode) Run(
 			}
 			updatedCtx.Metadata["tool_call_count"] = len(payload.ToolCalls)
 
+			// 防止重复执行同一轮对话中的工具调用，增加调用次数统计
+			toolLoopCount, _ := updatedCtx.Metadata["tool_loop_count"].(int)
+			updatedCtx.Metadata["tool_loop_count"] = toolLoopCount + 1
 			rt.Emit(&dag.Event{
 				Type: "tool_result_context",
 				Data: updatedCtx,
-				Rtx:  ev.Rtx,
 			})
 
 			// rt.Emit(&dag.Event{

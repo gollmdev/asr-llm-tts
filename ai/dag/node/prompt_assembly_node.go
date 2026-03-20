@@ -22,6 +22,9 @@ func (n *PromptAssemblyNode) Run(rt dag.NodeRuntime) error {
 			continue
 		}
 
+		if c, ok := tc.Metadata["tool_loop_count"].(int); ok && c >= 4 {
+			// 禁止继续 tool call，改成直接回答
+		}
 		var messages []*dagtypes.Message
 
 		systemPrompt := buildSystemPrompt(tc)
