@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+
+	"github.com/gollmdev/asr-llm-tts/ai/dag/dagtypes"
 )
 
 // TokenEvent represents an incremental token from the model.
@@ -17,29 +19,16 @@ type TokenEvent struct {
 type Provider interface {
 	// StreamChat streams completion for the given messages and yields TokenEvent on the returned channel.
 	// The channel is closed when streaming ends. Implementations should stop when ctx is done.
-	StreamChat(ctx context.Context, model string, messages []Message) (<-chan TokenEvent, error)
+	StreamChat(ctx context.Context, model string, messages []dagtypes.Message) (<-chan TokenEvent, error)
 }
 
 // Message is a minimal chat message shape.
-type Message struct {
-	Role       string     `json:"role"` // system | user | assistant | tool
-	Content    string     `json:"content,omitempty"`
-	Name       string     `json:"name,omitempty"` // tool name
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-}
 
-type ToolCall struct {
-	ID        string
-	Name      string
-	Arguments string
-}
-
-type ToolResult struct {
-	ToolCallID string
-	Name       string
-	Content    string
-}
+// type ToolResult struct {
+// 	ToolCallID string
+// 	Name       string
+// 	Content    string
+// }
 
 type StreamChatMessage struct {
 	Event     string

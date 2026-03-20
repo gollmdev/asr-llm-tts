@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gollmdev/asr-llm-tts/ai/dag/dagtypes"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -38,7 +39,7 @@ func NewOpenAICompatible(cfg OpenAIConfig) (*OpenAICompatible, error) {
 	return &OpenAICompatible{Client: openai.NewClientWithConfig(config)}, nil
 }
 
-func (p *OpenAICompatible) StreamChat(ctx context.Context, model string, messages []Message) (<-chan TokenEvent, error) {
+func (p *OpenAICompatible) StreamChat(ctx context.Context, model string, messages []dagtypes.Message) (<-chan TokenEvent, error) {
 	in := make([]openai.ChatCompletionMessage, 0, len(messages))
 	for _, m := range messages {
 		in = append(in, openai.ChatCompletionMessage{Role: m.Role, Content: m.Content})

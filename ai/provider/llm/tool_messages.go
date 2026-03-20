@@ -1,8 +1,12 @@
 package llm
 
-import "sort"
+import (
+	"sort"
 
-func NormalizeToolCalls(toolCalls *map[string]*ToolCallState) []ToolCall {
+	"github.com/gollmdev/asr-llm-tts/ai/dag/dagtypes"
+)
+
+func NormalizeToolCalls(toolCalls *map[string]*ToolCallState) []dagtypes.ToolCall {
 	if toolCalls == nil || len(*toolCalls) == 0 {
 		return nil
 	}
@@ -13,13 +17,13 @@ func NormalizeToolCalls(toolCalls *map[string]*ToolCallState) []ToolCall {
 	}
 	sort.Strings(ids)
 
-	result := make([]ToolCall, 0, len(ids))
+	result := make([]dagtypes.ToolCall, 0, len(ids))
 	for _, id := range ids {
 		call := (*toolCalls)[id]
 		if call == nil {
 			continue
 		}
-		result = append(result, ToolCall{
+		result = append(result, dagtypes.ToolCall{
 			ID:        id,
 			Name:      call.Name,
 			Arguments: call.Arguments.String(),
@@ -29,7 +33,7 @@ func NormalizeToolCalls(toolCalls *map[string]*ToolCallState) []ToolCall {
 	return result
 }
 
-func BuildAssistantToolCallMessage(toolCalls []ToolCall) map[string]any {
+func BuildAssistantToolCallMessage(toolCalls []dagtypes.ToolCall) map[string]any {
 	entries := make([]map[string]any, 0, len(toolCalls))
 	for index, toolCall := range toolCalls {
 		entries = append(entries, map[string]any{
@@ -50,13 +54,13 @@ func BuildAssistantToolCallMessage(toolCalls []ToolCall) map[string]any {
 	}
 }
 
-func BuildToolResultMessages(results []ToolResult) []map[string]any {
+func BuildToolResultMessages(results []dagtypes.ToolResult) []map[string]any {
 	messages := make([]map[string]any, 0, len(results))
 	for _, result := range results {
 		messages = append(messages, map[string]any{
 			"role":         "tool",
-			"name":         result.Name,
-			"content":      result.Content,
+			"name":         result.ToolName,
+			"content":      result.Result,
 			"tool_call_id": result.ToolCallID,
 		})
 	}

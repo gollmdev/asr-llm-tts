@@ -8,7 +8,7 @@ import (
 	"time"
 
 	dag "github.com/gollmdev/asr-llm-tts/ai/dag/core"
-	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
+	"github.com/gollmdev/asr-llm-tts/ai/dag/dagtypes"
 	"github.com/gollmdev/asr-llm-tts/ai/session"
 	"github.com/gorilla/websocket"
 	"golang.org/x/sync/errgroup"
@@ -223,7 +223,7 @@ func (c *Client) ReadPump() error {
 				// 	Type: event.EventTextChunk,
 				// 	Data: string(message),
 				// })
-				msg := []*llm.Message{
+				msg := []*dagtypes.Message{
 					{
 						Role:    "user",
 						Content: string(message),
@@ -252,7 +252,7 @@ func (c *Client) ReadPump() error {
 							// 	Type: event.EventTextChunk,
 							// 	Data: string(text),
 							// })
-							msg := []*llm.Message{
+							msg := []*dagtypes.Message{
 								{
 									Role:    "user",
 									Content: text,
@@ -405,7 +405,7 @@ func (c *Client) WritePump() error {
 					c.sendMessage(msg)
 				}
 			case "asr_text":
-				data := message.Data.([]*llm.Message)
+				data := message.Data.([]*dagtypes.Message)
 				log.Printf("Sending text message: %s", data[0].Content)
 				sendMsg := map[string]interface{}{
 					"data": map[string]string{
@@ -439,7 +439,7 @@ func (c *Client) WritePump() error {
 					c.sendMessage(msg)
 				}
 			case "llm_tool_call":
-				data, ok := message.Data.([]llm.ToolCall)
+				data, ok := message.Data.([]dagtypes.ToolCall)
 				if !ok {
 					continue
 				}
@@ -453,7 +453,7 @@ func (c *Client) WritePump() error {
 					c.sendMessage(msg)
 				}
 			case "tool_result":
-				data, ok := message.Data.([]llm.ToolResult)
+				data, ok := message.Data.([]dagtypes.ToolResult)
 				if !ok {
 					continue
 				}

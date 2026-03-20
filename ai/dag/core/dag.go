@@ -313,6 +313,9 @@ func (e *Engine) startNode(id string) {
 	targets := e.downstream[id]
 	for _, target := range targets {
 		state := e.nodeStates[target.ToNode]
+		if state == nil {
+			log.Printf("target node %s is nil", target.ToNode)
+		}
 		if !state.upstreamActive[id] {
 			// state.mu.Lock()
 			// state.activeUpstreams++

@@ -3,6 +3,8 @@ package llm
 import (
 	"strings"
 	"testing"
+
+	"github.com/gollmdev/asr-llm-tts/ai/dag/dagtypes"
 )
 
 func TestNormalizeToolCallsAndBuildMessages(t *testing.T) {
@@ -34,10 +36,10 @@ func TestNormalizeToolCallsAndBuildMessages(t *testing.T) {
 		t.Fatalf("expected 2 tool call entries, got %d", len(entries))
 	}
 
-	toolMessages := BuildToolResultMessages([]ToolResult{{
+	toolMessages := BuildToolResultMessages([]dagtypes.ToolResult{{
 		ToolCallID: "call_1",
-		Name:       "get_weather",
-		Content:    "杭州当前天气晴，气温15度。",
+		ToolName:   "get_weather",
+		Result:     "杭州当前天气晴，气温15度。",
 	}})
 	if len(toolMessages) != 1 {
 		t.Fatalf("expected 1 tool result message, got %d", len(toolMessages))

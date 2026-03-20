@@ -3,6 +3,8 @@ package dag
 import (
 	"context"
 	"log"
+
+	"github.com/gollmdev/asr-llm-tts/ai/dag/service"
 )
 
 type Session struct {
@@ -54,6 +56,7 @@ func NewSession(config *SessionConfig) *Session {
 		EnableTTS: false,
 		UserID:    config.UserId,
 		Services:  config.Services,
+		Retriever: &service.MockRetriever{},
 	}
 	engine := NewEngine(config.Ctx, config.Dag, rtx)
 	engine.OnDAGDone = func() {

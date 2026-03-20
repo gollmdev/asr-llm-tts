@@ -7,8 +7,8 @@ import (
 	"time"
 
 	dag "github.com/gollmdev/asr-llm-tts/ai/dag/core"
+	"github.com/gollmdev/asr-llm-tts/ai/dag/dagtypes"
 	asr "github.com/gollmdev/asr-llm-tts/ai/provider/asrv2"
-	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -115,7 +115,7 @@ func (n *ASRNode) Run(
 						rt.Emit(&dag.Event{From: n.ID(), Type: "no_asr_text"})
 						return nil
 					}
-					msg := []*llm.Message{
+					msg := []*dagtypes.Message{
 						{
 							Role:    "user",
 							Content: msg.Data,

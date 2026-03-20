@@ -5,6 +5,7 @@ import (
 	"log"
 
 	dag "github.com/gollmdev/asr-llm-tts/ai/dag/core"
+	"github.com/gollmdev/asr-llm-tts/ai/dag/dagtypes"
 	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
 	"golang.org/x/sync/errgroup"
 )
@@ -31,7 +32,8 @@ func (n *LLMNode) Run(
 		select {
 		case <-ctx.Done():
 			return nil
-		case message, ok := <-rt.Input():
+		case ev, ok := <-rt.Input():
+
 			if !ok {
 				log.Println("TTSStream completed")
 				return nil
@@ -70,13 +72,17 @@ func (n *LLMNode) Run(
 			// 	Content: userText,
 			// })
 			// messages := rt.RuntimeContext().Memory.Get(sessionID)
-			var messages []*llm.Message
-			if messages, ok = message.Data.([]*llm.Message); !ok {
-				log.Println("invalid message data")
+			// var messages []*llm.Message
+			// if messages, ok = ev.Data.([]*llm.Message); !ok {
+			// 	log.Println("invalid message data")
+			// 	continue
+			// }
+			payload, ok := ev.Data.(*dagtypes.PromptPayload)
+			if !ok || payload == nil {
+				log.Println("[chat] invalid prompt payload")
 				continue
 			}
-
-			llmModel.Stream(convertMessages(messages))
+			llmModel.Stream(dagtypes.ConvertMessages(payload.Messages))
 
 			for {
 				msg, err := llmModel.Recv()
@@ -101,10 +107,31 @@ func (n *LLMNode) Run(
 							Data: chunk,
 						})
 					} else if msg.Event == "OnToolCallFinish" && msg.ToolCalls != nil {
+						// rt.Emit(&dag.Event{
+						// 	Type: "llm_tool_call",
+						// 	From: n.ID(),
+						// 	Data: msg.ToolCalls,
+						// })
+						tools := msg.ToolCalls
+						// 将 *map[string]*ToolCallState 转换成  []dagtypes.ToolCall
+						var toolCalls []dagtypes.ToolCall
+						for id, t := range *tools {
+							toolCalls = append(toolCalls, dagtypes.ToolCall{
+								Name:      t.Name,
+								Arguments: t.Arguments.String(),
+								ID:        id,
+							})
+						}
+
+						// 这里可以根据需要过滤工具调用，比如只发送特定工具的调用
 						rt.Emit(&dag.Event{
 							Type: "llm_tool_call",
-							From: n.ID(),
-							Data: msg.ToolCalls,
+							Data: &dagtypes.ToolCallPayload{
+								Context:   payload.Context,
+								Messages:  payload.Messages,
+								ToolCalls: toolCalls,
+							},
+							Rtx: ev.Rtx,
 						})
 					}
 				}
@@ -115,26 +142,4 @@ func (n *LLMNode) Run(
 			return nil
 		}
 	}
-}
-func convertMessages(msgs []*llm.Message) []map[string]any {
-	var res []map[string]any
-	for _, m := range msgs {
-		item := map[string]any{
-			"role": m.Role,
-		}
-		if m.Content != "" {
-			item["content"] = m.Content
-		}
-		if m.ToolCalls != nil {
-			item["tool_calls"] = m.ToolCalls
-		}
-		if m.ToolCallID != "" {
-			item["tool_call_id"] = m.ToolCallID
-		}
-		if m.Name != "" {
-			item["name"] = m.Name
-		}
-		res = append(res, item)
-	}
-	return res
 }

@@ -7,6 +7,7 @@ import (
 	"log"
 
 	dag "github.com/gollmdev/asr-llm-tts/ai/dag/core"
+	"github.com/gollmdev/asr-llm-tts/ai/dag/dagtypes"
 	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
 	"golang.org/x/sync/errgroup"
 )
@@ -92,7 +93,7 @@ func (n *LLMLoopNode) runToolLoop(
 
 		stream.Stream(history)
 
-		var pendingToolCalls []llm.ToolCall
+		var pendingToolCalls []dagtypes.ToolCall
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
@@ -143,7 +144,7 @@ func (n *LLMLoopNode) runToolLoop(
 	}
 }
 
-func (n *LLMLoopNode) waitToolResults(ctx context.Context, input <-chan *dag.Event) ([]llm.ToolResult, error) {
+func (n *LLMLoopNode) waitToolResults(ctx context.Context, input <-chan *dag.Event) ([]dagtypes.ToolResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -155,7 +156,7 @@ func (n *LLMLoopNode) waitToolResults(ctx context.Context, input <-chan *dag.Eve
 			if ev == nil || ev.Type != "tool_result" {
 				continue
 			}
-			results, ok := ev.Data.([]llm.ToolResult)
+			results, ok := ev.Data.([]dagtypes.ToolResult)
 			if !ok {
 				return nil, errors.New("tool_result payload is invalid")
 			}
