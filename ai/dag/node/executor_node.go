@@ -75,7 +75,11 @@ func (n *ToolExecutorNode) ID() string { return "tool_executor" }
 func (n *ToolExecutorNode) Mode() dag.NodeMode {
 	return dag.ModeLazy
 }
-
+func (n *ToolExecutorNode) ClosePolicy() dag.NodeClosePolicy {
+	return dag.AggregateClosePolicy{
+		Required: dag.Any(dag.HasEvent("llm_complete")),
+	}
+}
 func (n *ToolExecutorNode) Run(
 	// ctx context.Context,
 	rt dag.NodeRuntime,
@@ -88,6 +92,7 @@ func (n *ToolExecutorNode) Run(
 		case ev, ok := <-rt.Input():
 			if !ok {
 				return nil
+				// continue
 			}
 			payload, ok := ev.Data.(*dagtypes.ToolCallPayload)
 			if !ok || payload == nil || payload.Context == nil {

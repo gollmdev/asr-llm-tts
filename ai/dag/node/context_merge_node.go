@@ -19,11 +19,16 @@ type ContextMergeNode struct {
 	// state map[string]*mergeState
 }
 
-// func NewContextMergeNode() *ContextMergeNode {
-// 	return &ContextMergeNode{
-// 		state: make(map[string]*mergeState),
-// 	}
-// }
+//	func NewContextMergeNode() *ContextMergeNode {
+//		return &ContextMergeNode{
+//			state: make(map[string]*mergeState),
+//		}
+//	}
+func (n *ContextMergeNode) ClosePolicy() dag.NodeClosePolicy {
+	return dag.AggregateClosePolicy{
+		Required: dag.Any(dag.HasEvent("llm_complete")),
+	}
+}
 
 func (n *ContextMergeNode) ID() string { return "context_merge" }
 func (n *ContextMergeNode) Mode() dag.NodeMode {

@@ -134,7 +134,10 @@ func (c *ChatStreamReader) ReadLoop() {
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if payload == "[DONE]" {
 			// close(c.message)
+			c.message <- &StreamChatMessage{Event: "OnFinish"}
+
 			c.Close()
+
 			return
 		}
 

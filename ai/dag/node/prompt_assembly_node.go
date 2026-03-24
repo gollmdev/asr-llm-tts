@@ -14,7 +14,11 @@ func (n *PromptAssemblyNode) ID() string { return "prompt_assembly" }
 func (n *PromptAssemblyNode) Mode() dag.NodeMode {
 	return dag.ModeLazy
 }
-
+func (n *PromptAssemblyNode) ClosePolicy() dag.NodeClosePolicy {
+	return dag.AggregateClosePolicy{
+		Required: dag.Any(dag.HasEvent("llm_complete")),
+	}
+}
 func (n *PromptAssemblyNode) Run(rt dag.NodeRuntime) error {
 	for ev := range rt.Input() {
 		tc, ok := ev.Data.(*dagtypes.TurnContext)

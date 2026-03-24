@@ -35,7 +35,7 @@ func (n *LLMNode) Run(
 		case ev, ok := <-rt.Input():
 
 			if !ok {
-				log.Println("TTSStream completed")
+				log.Println("LLM stream completed")
 				return nil
 			}
 
@@ -133,13 +133,27 @@ func (n *LLMNode) Run(
 							},
 							Rtx: ev.Rtx,
 						})
+						break
+					} else if msg.Event == "OnFinish" {
+						rt.Emit(&dag.Event{
+							Type: "llm_complete",
+							From: n.ID(),
+							Data: nil,
+						})
+						return nil
+
 					}
 				}
 			}
 
 			log.Println("llm consumer close!")
 
-			return nil
+			// return nil
 		}
 	}
+	// rt.Emit(&dag.Event{
+	// 	Type: "llm_complete",
+	// 	From: n.ID(),
+	// })
+	// return nil
 }
