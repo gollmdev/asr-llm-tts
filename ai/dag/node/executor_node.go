@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -71,6 +72,8 @@ func (n *ToolExecutorNode) Run(
 	// out chan<- dag.Event,
 ) error {
 	ctx := rt.Context()
+	sessionId := rt.RuntimeContext().SessionID
+	userId := rt.RuntimeContext().UserID
 	for {
 		select {
 		case ev, ok := <-rt.Input():
@@ -85,6 +88,9 @@ func (n *ToolExecutorNode) Run(
 
 			results := make([]dagtypes.ToolResult, 0, len(payload.ToolCalls))
 			for _, toolCall := range payload.ToolCalls {
+				toolCall.SessionID = sessionId
+				toolCall.UserId = userId
+
 				results = append(results, n.executeTool(toolCall))
 			}
 			updatedCtx := dagtypes.CloneTurnContext(payload.Context)
@@ -123,14 +129,17 @@ func (n *ToolExecutorNode) RegisterTool(name string, fn ToolFunc) {
 	n.toolFunc[name] = fn
 }
 func (n *ToolExecutorNode) executeTool(toolCall dagtypes.ToolCall) dagtypes.ToolResult {
+	enrichedArgs := injectSessionAndUserArgs(toolCall.Arguments, toolCall.SessionID, toolCall.UserId)
+	toolCall.Arguments = enrichedArgs
+
 	result := dagtypes.ToolResult{
 		ToolCallID: toolCall.ID,
 		ToolName:   toolCall.Name,
-		Args:       toolCall.Arguments,
+		Args:       enrichedArgs,
 	}
 
 	if fn := n.registeredTool(toolCall.Name); fn != nil {
-		content, err := fn(toolCall.Arguments)
+		content, err := fn(enrichedArgs)
 		if err != nil {
 			result.Result = fmt.Sprintf("tool %s execute failed: %v", toolCall.Name, err)
 			return result
@@ -142,4 +151,30 @@ func (n *ToolExecutorNode) executeTool(toolCall dagtypes.ToolCall) dagtypes.Tool
 	result.Result = fmt.Sprintf("tool %s is not implemented", toolCall.Name)
 
 	return result
+}
+
+func injectSessionAndUserArgs(arguments string, sessionId, userId int64) string {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(arguments), &obj); err == nil && obj != nil {
+		obj["sessionId"] = sessionId
+		obj["userId"] = userId
+		obj["_systemUserId"] = userId
+		if b, err := json.Marshal(obj); err == nil {
+			return string(b)
+		}
+	}
+
+	wrapped := map[string]any{
+		"sessionId":     sessionId,
+		"userId":        userId,
+		"_systemUserId": userId,
+	}
+	if arguments != "" {
+		wrapped["_rawArguments"] = arguments
+	}
+	if b, err := json.Marshal(wrapped); err == nil {
+		return string(b)
+	}
+
+	return arguments
 }

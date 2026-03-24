@@ -26,6 +26,8 @@ type ToolCall struct {
 	ID        string
 	Name      string
 	Arguments string
+	SessionID int64
+	UserId    int64
 }
 
 type ToolResult struct {
