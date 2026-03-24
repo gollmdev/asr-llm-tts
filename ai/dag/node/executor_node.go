@@ -1,7 +1,6 @@
 package node
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -16,12 +15,6 @@ type ToolExecutorNode struct {
 	toolFunc map[string]ToolFunc
 }
 
-// func BuiltinToolRegistry() map[string]ToolFunc {
-// 	return map[string]ToolFunc{
-// 		"get_weather": GetWeatherTool,
-// 	}
-// }
-
 func NewToolExecutorNode() *ToolExecutorNode {
 	return &ToolExecutorNode{
 		toolFunc: make(map[string]ToolFunc),
@@ -30,31 +23,31 @@ func NewToolExecutorNode() *ToolExecutorNode {
 
 // RegisterToolsFromDefinitions auto-binds tool handlers by matching tool definition
 // function names with handlers from the provided registry.
-// func (n *ToolExecutorNode) RegisterToolsFromDefinitions(definitions []map[string]any, registry map[string]ToolFunc) []string {
-// 	missing := make([]string, 0)
-// 	for _, definition := range definitions {
-// 		name := toolNameFromDefinition(definition)
-// 		if name == "" {
-// 			continue
-// 		}
-// 		fn := registry[name]
-// 		if fn == nil {
-// 			missing = append(missing, name)
-// 			continue
-// 		}
-// 		n.RegisterTool(name, fn)
-// 	}
-// 	return missing
-// }
+func (n *ToolExecutorNode) RegisterToolsFromDefinitions(definitions []map[string]any, registry map[string]ToolFunc) []string {
+	missing := make([]string, 0)
+	for _, definition := range definitions {
+		name := toolNameFromDefinition(definition)
+		if name == "" {
+			continue
+		}
+		fn := registry[name]
+		if fn == nil {
+			missing = append(missing, name)
+			continue
+		}
+		n.RegisterTool(name, fn)
+	}
+	return missing
+}
 
-// func toolNameFromDefinition(definition map[string]any) string {
-// 	fn, ok := definition["function"].(map[string]any)
-// 	if !ok {
-// 		return ""
-// 	}
-// 	name, _ := fn["name"].(string)
-// 	return name
-// }
+func toolNameFromDefinition(definition map[string]any) string {
+	fn, ok := definition["function"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := fn["name"].(string)
+	return name
+}
 
 func (n *ToolExecutorNode) registeredTool(name string) ToolFunc {
 	n.mu.RLock()
@@ -149,20 +142,4 @@ func (n *ToolExecutorNode) executeTool(toolCall dagtypes.ToolCall) dagtypes.Tool
 	result.Result = fmt.Sprintf("tool %s is not implemented", toolCall.Name)
 
 	return result
-}
-
-func GetWeatherTool(arguments string) (string, error) {
-	type weatherArgs struct {
-		Location string `json:"location"`
-	}
-
-	var args weatherArgs
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
-		return "", fmt.Errorf("无法解析天气查询参数: %w", err)
-	}
-	if args.Location == "" {
-		return "", fmt.Errorf("缺少 location 参数")
-	}
-
-	return fmt.Sprintf("%s当前天气晴，气温15度。", args.Location), nil
 }
