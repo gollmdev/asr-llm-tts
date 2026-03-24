@@ -16,11 +16,11 @@ type ToolExecutorNode struct {
 	toolFunc map[string]ToolFunc
 }
 
-func BuiltinToolRegistry() map[string]ToolFunc {
-	return map[string]ToolFunc{
-		"get_weather": GetWeatherTool,
-	}
-}
+// func BuiltinToolRegistry() map[string]ToolFunc {
+// 	return map[string]ToolFunc{
+// 		"get_weather": GetWeatherTool,
+// 	}
+// }
 
 func NewToolExecutorNode() *ToolExecutorNode {
 	return &ToolExecutorNode{
@@ -28,42 +28,33 @@ func NewToolExecutorNode() *ToolExecutorNode {
 	}
 }
 
-func (n *ToolExecutorNode) RegisterTool(name string, fn ToolFunc) {
-	if name == "" || fn == nil {
-		return
-	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.toolFunc[name] = fn
-}
-
 // RegisterToolsFromDefinitions auto-binds tool handlers by matching tool definition
 // function names with handlers from the provided registry.
-func (n *ToolExecutorNode) RegisterToolsFromDefinitions(definitions []map[string]any, registry map[string]ToolFunc) []string {
-	missing := make([]string, 0)
-	for _, definition := range definitions {
-		name := toolNameFromDefinition(definition)
-		if name == "" {
-			continue
-		}
-		fn := registry[name]
-		if fn == nil {
-			missing = append(missing, name)
-			continue
-		}
-		n.RegisterTool(name, fn)
-	}
-	return missing
-}
+// func (n *ToolExecutorNode) RegisterToolsFromDefinitions(definitions []map[string]any, registry map[string]ToolFunc) []string {
+// 	missing := make([]string, 0)
+// 	for _, definition := range definitions {
+// 		name := toolNameFromDefinition(definition)
+// 		if name == "" {
+// 			continue
+// 		}
+// 		fn := registry[name]
+// 		if fn == nil {
+// 			missing = append(missing, name)
+// 			continue
+// 		}
+// 		n.RegisterTool(name, fn)
+// 	}
+// 	return missing
+// }
 
-func toolNameFromDefinition(definition map[string]any) string {
-	fn, ok := definition["function"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	name, _ := fn["name"].(string)
-	return name
-}
+// func toolNameFromDefinition(definition map[string]any) string {
+// 	fn, ok := definition["function"].(map[string]any)
+// 	if !ok {
+// 		return ""
+// 	}
+// 	name, _ := fn["name"].(string)
+// 	return name
+// }
 
 func (n *ToolExecutorNode) registeredTool(name string) ToolFunc {
 	n.mu.RLock()
@@ -130,6 +121,14 @@ func (n *ToolExecutorNode) Run(
 	}
 }
 
+func (n *ToolExecutorNode) RegisterTool(name string, fn ToolFunc) {
+	if name == "" || fn == nil {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.toolFunc[name] = fn
+}
 func (n *ToolExecutorNode) executeTool(toolCall dagtypes.ToolCall) dagtypes.ToolResult {
 	result := dagtypes.ToolResult{
 		ToolCallID: toolCall.ID,
