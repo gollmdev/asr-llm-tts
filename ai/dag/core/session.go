@@ -21,6 +21,7 @@ type SessionConfig struct {
 	SessionId int64
 	UserId    int64
 	Services  map[string]any
+	Memory    MemoryStore
 }
 
 type ChannelEmitter struct {
@@ -48,10 +49,10 @@ func NewSession(config *SessionConfig) *Session {
 	// 		ToNode:   "final",
 	// 	},
 	// )
-	memory := NewMemoryStore()
+	// memory := NewMemoryStore()
 	rtx := &RuntimeContext{
 		SessionID: config.SessionId,
-		Memory:    memory,
+		Memory:    config.Memory,
 		Output:    &ChannelEmitter{outputChan},
 		EnableTTS: false,
 		UserID:    config.UserId,

@@ -8,6 +8,8 @@ import (
 
 // type Message string
 type MemoryStore interface {
+	Init(sessionId int64) error
+	Save(sessionId int64) error
 	Get(sessionID int64) []*dagtypes.Message
 	Append(sessionID int64, msg *dagtypes.Message) error
 	GetRecent(sessionID int64, n int) ([]*dagtypes.Message, error)
@@ -66,4 +68,16 @@ func (m *InMemoryStore) GetSummary(sessionID int64) (string, error) {
 		content = content[:20]
 	}
 	return content, nil
+}
+
+func (m *InMemoryStore) Init(sessionId int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.store[sessionId] = []*dagtypes.Message{}
+	return nil
+}
+
+func (m *InMemoryStore) Save(sessionId int64) error {
+	// InMemoryStore不需要持久化，直接返回nil
+	return nil
 }

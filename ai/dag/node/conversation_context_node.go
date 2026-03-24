@@ -50,6 +50,7 @@ func (n *ConversationContextNode) Run(rt dag.NodeRuntime) error {
 				continue
 			}
 
+			rtx.Memory.Init(sessionID) // ensure memory is initialized
 			if err := rtx.Memory.Append(sessionID, last); err != nil {
 				log.Printf("[conversation_context] append memory error: %v", err)
 			}
