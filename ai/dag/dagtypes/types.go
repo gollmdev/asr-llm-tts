@@ -39,12 +39,12 @@ type ToolResult struct {
 }
 
 type RouteDecision struct {
-	Intent      string
-	UseRAG      bool
-	UseTools    bool
-	DirectReply bool
-	NeedTTS     bool
-	Reason      string
+	Intent      string `json:"intent"`
+	UseRAG      bool   `json:"use_rag"`
+	UseTools    bool   `json:"use_tools"`
+	DirectReply bool   `json:"direct_reply"`
+	NeedTTS     bool   `json:"need_tts"`
+	Reason      string `json:"reason"`
 }
 
 type UserTurnInput struct {

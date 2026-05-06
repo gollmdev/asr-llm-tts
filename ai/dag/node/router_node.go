@@ -11,14 +11,6 @@ import (
 	"github.com/gollmdev/asr-llm-tts/ai/provider/llm"
 )
 
-type routerResp struct {
-	Intent      string `json:"intent"`
-	UseRAG      bool   `json:"use_rag"`
-	UseTools    bool   `json:"use_tools"`
-	DirectReply bool   `json:"direct_reply"`
-	Reason      string `json:"reason"`
-}
-
 type RouterNode struct{}
 
 func (n *RouterNode) ID() string         { return "router" }
@@ -104,8 +96,9 @@ func (n *RouterNode) routeWithLLM(ctx context.Context, rt dag.NodeRuntime, tc *d
 	}
 
 	raw := buf.String()
-	var rr routerResp
-	if err := json.Unmarshal([]byte(extractJSON(raw)), &rr); err != nil {
+	var rr dagtypes.RouteDecision
+	// "{\n  \"intent\": \"health_advice\",\n  \"use_rag\": true,\n  \"use_tools\": false,\n  \"direct_reply\": false,\n  \"reason\": \"短链脂肪酸（SCFA。\"\n}"
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &rr); err != nil {
 		log.Printf("[router] parse route json failed: %v raw=%s", err, raw)
 		return &dagtypes.RouteDecision{
 			Intent:      "chat",
@@ -117,21 +110,6 @@ func (n *RouterNode) routeWithLLM(ctx context.Context, rt dag.NodeRuntime, tc *d
 		}
 	}
 
-	return &dagtypes.RouteDecision{
-		Intent:      rr.Intent,
-		UseRAG:      rr.UseRAG,
-		UseTools:    rr.UseTools,
-		DirectReply: rr.DirectReply,
-		Reason:      rr.Reason,
-		NeedTTS:     rt.RuntimeContext().EnableTTS,
-	}
-}
-
-func extractJSON(s string) string {
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start >= 0 && end > start {
-		return s[start : end+1]
-	}
-	return s
+	rr.NeedTTS = rt.RuntimeContext().EnableTTS
+	return &rr
 }

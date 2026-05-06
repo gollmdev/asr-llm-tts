@@ -20,68 +20,77 @@ func (n *PromptAssemblyNode) ClosePolicy() dag.NodeClosePolicy {
 	}
 }
 func (n *PromptAssemblyNode) Run(rt dag.NodeRuntime) error {
-	for ev := range rt.Input() {
-		tc, ok := ev.Data.(*dagtypes.TurnContext)
-		if !ok || tc == nil || tc.UserInput == nil {
-			continue
-		}
+	ctx := rt.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case ev, ok := <-rt.Input():
+			if !ok {
+				return nil
+			}
+			tc, ok := ev.Data.(*dagtypes.TurnContext)
+			if !ok || tc == nil || tc.UserInput == nil {
+				continue
+			}
+			if c, ok := tc.Metadata["tool_loop_count"].(int); ok && c >= 4 {
+				// 禁止继续 tool call，改成直接回答
+			}
+			var messages []*dagtypes.Message
 
-		if c, ok := tc.Metadata["tool_loop_count"].(int); ok && c >= 4 {
-			// 禁止继续 tool call，改成直接回答
-		}
-		var messages []*dagtypes.Message
-
-		systemPrompt := buildSystemPrompt(tc)
-		messages = append(messages, &dagtypes.Message{
-			Role:    "system",
-			Content: systemPrompt,
-		})
-
-		if tc.Summary != "" {
+			systemPrompt := buildSystemPrompt(tc)
 			messages = append(messages, &dagtypes.Message{
 				Role:    "system",
-				Content: "对话摘要：\n" + tc.Summary,
+				Content: systemPrompt,
+			})
+
+			if tc.Summary != "" {
+				messages = append(messages, &dagtypes.Message{
+					Role:    "system",
+					Content: "对话摘要：\n" + tc.Summary,
+				})
+			}
+
+			if len(tc.LongMemories) > 0 {
+				messages = append(messages, &dagtypes.Message{
+					Role:    "system",
+					Content: "长期记忆：\n" + formatLongMemories(tc.LongMemories),
+				})
+			}
+
+			if len(tc.Docs) > 0 {
+				messages = append(messages, &dagtypes.Message{
+					Role:    "system",
+					Content: "参考资料：\n" + formatDocs(tc.Docs),
+				})
+			}
+
+			if len(tc.ToolResults) > 0 {
+				messages = append(messages, &dagtypes.Message{
+					Role:    "system",
+					Content: "工具结果：\n" + formatToolResults(tc.ToolResults),
+				})
+			}
+
+			if len(tc.History) > 0 {
+				messages = append(messages, tc.History...)
+			} else {
+				messages = append(messages, tc.UserInput)
+			}
+
+			payload := &dagtypes.PromptPayload{
+				Context:  tc,
+				Messages: messages,
+			}
+
+			rt.Emit(&dag.Event{
+				Type: "prompt_ready",
+				Data: payload,
+				Rtx:  ev.Rtx,
 			})
 		}
-
-		if len(tc.LongMemories) > 0 {
-			messages = append(messages, &dagtypes.Message{
-				Role:    "system",
-				Content: "长期记忆：\n" + formatLongMemories(tc.LongMemories),
-			})
-		}
-
-		if len(tc.Docs) > 0 {
-			messages = append(messages, &dagtypes.Message{
-				Role:    "system",
-				Content: "参考资料：\n" + formatDocs(tc.Docs),
-			})
-		}
-
-		if len(tc.ToolResults) > 0 {
-			messages = append(messages, &dagtypes.Message{
-				Role:    "system",
-				Content: "工具结果：\n" + formatToolResults(tc.ToolResults),
-			})
-		}
-
-		if len(tc.History) > 0 {
-			messages = append(messages, tc.History...)
-		} else {
-			messages = append(messages, tc.UserInput)
-		}
-
-		payload := &dagtypes.PromptPayload{
-			Context:  tc,
-			Messages: messages,
-		}
-
-		rt.Emit(&dag.Event{
-			Type: "prompt_ready",
-			Data: payload,
-			Rtx:  ev.Rtx,
-		})
 	}
+
 	return nil
 }
 
@@ -96,6 +105,7 @@ func buildSystemPrompt(tc *dagtypes.TurnContext) string {
 	if tc.Route != nil && tc.Route.UseTools {
 		sb.WriteString("4. 允许在必要时发起工具调用。\n")
 	}
+	sb.WriteString("请在回答结束时提出用户可能感兴趣的后续问题!")
 	return sb.String()
 }
 

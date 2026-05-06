@@ -37,34 +37,78 @@ func (n *ContextMergeNode) Mode() dag.NodeMode {
 
 func (n *ContextMergeNode) Run(rt dag.NodeRuntime) error {
 	state := make(map[string]*mergeState)
-	for ev := range rt.Input() {
-		tc, ok := ev.Data.(*dagtypes.TurnContext)
-		if !ok || tc == nil {
-			log.Println("[context_merge] invalid turn context")
-			continue
-		}
-		if tc.TurnID == "" {
-			log.Println("[context_merge] empty turn id")
-			continue
-		}
+	ctx := rt.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case ev, ok := <-rt.Input():
+			if !ok {
+				return nil
+			}
+			tc, ok := ev.Data.(*dagtypes.TurnContext)
+			if !ok || tc == nil {
+				log.Println("[context_merge] invalid turn context")
+				continue
+			}
+			if tc.TurnID == "" {
+				log.Println("[context_merge] empty turn id")
+				continue
+			}
 
-		// n.mu.Lock()
-		ms, exists := state[tc.TurnID]
-		if !exists {
-			ms = &mergeState{}
-			state[tc.TurnID] = ms
-		}
+			// n.mu.Lock()
+			ms, exists := state[tc.TurnID]
+			if !exists {
+				ms = &mergeState{}
+				state[tc.TurnID] = ms
+			}
 
-		if ms.Context == nil {
-			ms.Context = tc
-		} else {
-			ms.Context = mergeTurnContext(ms.Context, tc)
-		}
+			if ms.Context == nil {
+				ms.Context = tc
+			} else {
+				ms.Context = mergeTurnContext(ms.Context, tc)
+			}
 
-		switch ev.Type {
-		case "route_ready":
-			ms.RouteDone = true
-			if ms.Context.Route != nil && !ms.Context.Route.UseRAG {
+			switch ev.Type {
+			case "route_ready":
+				ms.RouteDone = true
+				if ms.Context.Route != nil && !ms.Context.Route.UseRAG {
+					readyCtx := ms.Context
+					delete(state, tc.TurnID)
+					// n.mu.Unlock()
+
+					rt.Emit(&dag.Event{
+						Type: "context_merged",
+						Data: readyCtx,
+						Rtx:  ev.Rtx,
+					})
+					continue
+				}
+
+			case "rag_ready":
+				ms.RAGDone = true
+			case "tool_result_context":
+				readyCtx := ms.Context
+				delete(state, tc.TurnID)
+
+				rt.Emit(&dag.Event{
+					Type: "context_merged",
+					Data: readyCtx,
+					Rtx:  ev.Rtx,
+				})
+				continue
+			}
+
+			shouldEmit := false
+			if ms.Context.Route != nil {
+				if ms.Context.Route.UseRAG {
+					shouldEmit = ms.RouteDone && ms.RAGDone
+				} else {
+					shouldEmit = ms.RouteDone
+				}
+			}
+
+			if shouldEmit {
 				readyCtx := ms.Context
 				delete(state, tc.TurnID)
 				// n.mu.Unlock()
@@ -76,45 +120,9 @@ func (n *ContextMergeNode) Run(rt dag.NodeRuntime) error {
 				})
 				continue
 			}
-
-		case "rag_ready":
-			ms.RAGDone = true
-		case "tool_result_context":
-			readyCtx := ms.Context
-			delete(state, tc.TurnID)
-
-			rt.Emit(&dag.Event{
-				Type: "context_merged",
-				Data: readyCtx,
-				Rtx:  ev.Rtx,
-			})
-			continue
 		}
-
-		shouldEmit := false
-		if ms.Context.Route != nil {
-			if ms.Context.Route.UseRAG {
-				shouldEmit = ms.RouteDone && ms.RAGDone
-			} else {
-				shouldEmit = ms.RouteDone
-			}
-		}
-
-		if shouldEmit {
-			readyCtx := ms.Context
-			delete(state, tc.TurnID)
-			// n.mu.Unlock()
-
-			rt.Emit(&dag.Event{
-				Type: "context_merged",
-				Data: readyCtx,
-				Rtx:  ev.Rtx,
-			})
-			continue
-		}
-
-		// n.mu.Unlock()
 	}
+
 	return nil
 }
 
