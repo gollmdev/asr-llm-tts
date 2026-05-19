@@ -25,11 +25,11 @@ type SessionConfig struct {
 }
 
 type ChannelEmitter struct {
-	ch chan *Event
+	Ch chan *Event
 }
 
 func (e *ChannelEmitter) Emit(ev *Event) {
-	e.ch <- ev
+	e.Ch <- ev
 }
 
 func NewSession(config *SessionConfig) *Session {
@@ -84,7 +84,7 @@ func (s *Session) SetTTS(enable bool) {
 
 func (s *Session) Dispatch(eventType string, data any) {
 	// s.engine.wg.Add(1)
-	s.engine.dispatch(&Event{
+	s.engine.Dispatch(&Event{
 		From: "__external__",
 		Type: eventType,
 		Data: data,

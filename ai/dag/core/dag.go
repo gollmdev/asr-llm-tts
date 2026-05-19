@@ -281,7 +281,7 @@ func (e *Engine) dispatchLoop() error {
 			if !ok {
 				return nil
 			}
-			e.dispatch(ev)
+			e.Dispatch(ev)
 		}
 	}
 
@@ -423,7 +423,7 @@ func (e *Engine) isNode(id string) bool {
 // 某个节点 e.wg.Done() 后
 // 可能 dispatch 又 startNode
 // 导致 wg.Wait() 提前返回或语义失效
-func (e *Engine) dispatch(ev *Event) {
+func (e *Engine) Dispatch(ev *Event) {
 	log.Printf("dispatch %s %s", ev.From, ev.Type)
 
 	targets := e.router.Route(ev)
