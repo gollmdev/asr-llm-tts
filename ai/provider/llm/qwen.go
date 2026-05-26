@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,12 +75,14 @@ type LLMStream struct {
 	g              *errgroup.Group
 	cancel         context.CancelFunc
 	started        bool
+	ResponseJson   bool
 }
 type ChatModelConfig struct {
-	Model string
-	Tools []map[string]any
-	Ctx   context.Context
-	G     *errgroup.Group
+	Model        string
+	Tools        []map[string]any
+	Ctx          context.Context
+	G            *errgroup.Group
+	ResponseJson bool
 }
 
 // model string,
@@ -87,6 +90,7 @@ type ChatModelConfig struct {
 // OnTextFunc func(delta string)
 func NewQwenChatModel(config *ChatModelConfig) *LLMStream {
 	ctx, cancel := context.WithCancel(config.Ctx)
+
 	return &LLMStream{
 		url:    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
 		apiKey: os.Getenv("DASHSCOPE_API_KEY"),
@@ -102,6 +106,7 @@ func NewQwenChatModel(config *ChatModelConfig) *LLMStream {
 		g:              config.G,
 		started:        false,
 		// toolCalls:      make(map[string]*ToolCallState),
+		ResponseJson: config.ResponseJson,
 	}
 }
 
@@ -111,10 +116,16 @@ func (l *LLMStream) reqPayload(message []map[string]any, stream bool) map[string
 		"messages": message,
 		"stream":   stream,
 		"tools":    l.tools,
-		// "stream_options": map[string]any{
-		// 	"include_usage": true,
-		// },
 	}
+	if l.ResponseJson {
+		body["response_format"] = map[string]any{
+			"type": "json_object",
+		}
+	}
+	// "stream_options": map[string]any{
+	// 	"include_usage": true,
+	// },
+
 	if stream {
 		body["stream_options"] = map[string]any{
 			"include_usage": true,
@@ -143,7 +154,28 @@ func (l *LLMStream) buildRequest(ctx context.Context, message []map[string]any, 
 
 func (l *LLMStream) Call(message []map[string]any, stream bool) (*StreamChatMessage, error) {
 	// g, ctx := errgroup.WithContext(ctx)
-	client := &http.Client{Timeout: 0}
+	client := &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			// TLSHandshakeTimeout:   15 * time.Second,
+			// ResponseHeaderTimeout: 15 * time.Second,
+			// ExpectContinueTimeout: 1 * time.Second,
+
+			// DialContext: (&net.Dialer{
+			// 	Timeout:   10 * time.Second,
+			// 	KeepAlive: 30 * time.Second,
+			// }).DialContext,
+
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			},
+
+			ForceAttemptHTTP2: true,
+			// MaxIdleConns:      100,
+			// IdleConnTimeout:   90 * time.Second,
+		},
+	}
+
 	l.currentMessage = append(l.currentMessage, message...)
 	defer log.Println("llm-life: llm call done")
 	// for {

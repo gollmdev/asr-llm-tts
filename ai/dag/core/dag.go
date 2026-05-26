@@ -424,7 +424,7 @@ func (e *Engine) isNode(id string) bool {
 // 可能 dispatch 又 startNode
 // 导致 wg.Wait() 提前返回或语义失效
 func (e *Engine) Dispatch(ev *Event) {
-	log.Printf("dispatch %s %s", ev.From, ev.Type)
+	log.Printf("dispatch from %s  %s", ev.From, ev.Type)
 
 	targets := e.router.Route(ev)
 	// if ev.From == "asr" {
