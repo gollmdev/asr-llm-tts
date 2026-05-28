@@ -14,6 +14,7 @@ type RuntimeContext struct {
 	Output    Emitter
 	Services  map[string]any
 	Retriever service.Retriever
+	Config    any
 	// Ctx       context.Context
 	// Cancel    context.CancelFunc
 }
